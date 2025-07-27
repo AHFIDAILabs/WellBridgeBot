@@ -1,0 +1,22 @@
+ # Render deployment configuration for Lighthouse HealthConnect: render.yaml
+# This file defines the services, environment variables, and other settings for deploying the Lighthouse HealthConnect
+# render.yaml
+services:
+  - type: web
+    name: lighthouse-healthconnect
+    runtime: docker
+    plan: free
+    healthCheckPath: /_stcore/health
+    envVars:
+      - key: OPENROUTER_API_KEY
+        fromSecret: true
+      - key: PINECONE_API_KEY
+        fromSecret: true
+      - key: PINECONE_REGION
+        fromSecret: true
+      - key: HUGGINGFACE_API_TOKEN
+        fromSecret: true
+      - key: PYTHON_VERSION
+        value: 3.9
+      - key: STREAMLIT_SERVER_PORT
+        value: 8501

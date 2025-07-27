@@ -1,0 +1,47 @@
+# Requirements for the project: requirements.txt
+streamlit
+pinecone-client
+langchain
+langchain-core
+langchain-community
+langchain-pinecone
+langchain-openai
+langchain-huggingface
+python-dotenv
+requests
+pydub
+SpeechRecognition
+gTTS
+huggingface_hub
+sentence-transformers
+pypdf
+beautifulsoup4
+unstructured
+langdetect
+numpy==1.26.4
+torch
+scikit-learn
+streamlit-audiorec
+
+### requirements.txt (updated and pinned)
+# streamlit==1.35.0
+# pinecone==3.0.0
+# langchain==0.1.16
+# langchain-core==0.1.52
+# langchain-community==0.0.32
+# langchain-pinecone==0.0.3
+# langchain-openai==0.1.7
+# python-dotenv==1.0.1
+# requests==2.32.2
+# pydub==0.25.1
+# SpeechRecognition==3.10.1
+# gTTS==2.5.1
+# huggingface_hub==0.23.3
+# sentence-transformers==2.6.1
+# pypdf==4.2.0
+# beautifulsoup4==4.12.3
+# unstructured==0.10.30
+# langdetect==1.0.9
+# numpy==1.26.4
+# torch==2.2.2
+# scikit-learn==1.4.2
