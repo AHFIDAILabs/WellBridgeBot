@@ -26,6 +26,8 @@ The application operates on a three-tiered architecture:
 *If RAG fails:*
 `RAG Chain` -> `"I don't know"` -> `LLM Handler` -> `DuckDuckGo Search` -> `Re-prompt OpenRouter LLM with search context` -> `Response`
 
+![### Data Flow Diagram](flow_diagram.jpeg)
+
 ---
 
 ## 3. Core Modules
