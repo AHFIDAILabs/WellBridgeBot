@@ -1,122 +1,157 @@
-# Vector store management utilities for Lighthouse HealthConnect: modules/vector_store_manager.py
+# Vector Store Management - vector_store_manager.py: vector store management utilities for Lighthouse HealthConnect
 import logging
 from typing import List
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_pinecone import Pinecone as LangchainPinecone
-from pinecone import Pinecone, ServerlessSpec
 from langchain_core.documents import Document
+from langchain_pinecone import Pinecone as LangchainPinecone
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from pinecone import Pinecone, ServerlessSpec
+import time
 
-from modules.knowledge_base_manager import chunk_documents
 from config import (
     PINECONE_API_KEY,
     PINECONE_INDEX_NAME,
     PINECONE_REGION,
     PINECONE_CLOUD,
-    EMBEDDING_MODEL
+    EMBEDDING_MODEL,
+    TEXT_KEY,
 )
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
-EMBEDDING_DIM = 384
-TEXT_KEY = "text"
 
-_pinecone_client = None # Global Pinecone client instance
-
-def init_pinecone():
+def _init_pinecone_index():
     """
-    Initializes the Pinecone client and ensures the index exists.
-    Returns the Pinecone index object.
+    Initializes Pinecone client and ensures the index exists.
     """
-    global _pinecone_client
-    if _pinecone_client is None:
+    if not PINECONE_API_KEY:
+        raise ValueError("PINECONE_API_KEY is not set in environment variables")
+    
+    pc = Pinecone(api_key=PINECONE_API_KEY)
+
+    # Check if index exists
+    existing_indexes = [idx["name"] for idx in pc.list_indexes()]
+    
+    if PINECONE_INDEX_NAME not in existing_indexes:
+        logger.info(
+            f"Index '{PINECONE_INDEX_NAME}' not found. Creating a new one in {PINECONE_CLOUD}-{PINECONE_REGION}..."
+        )
+        
         try:
-            _pinecone_client = Pinecone(api_key=PINECONE_API_KEY)
-            logger.info("Pinecone client initialized successfully.")
-        except Exception as e:
-            logger.error(f"Failed to initialize Pinecone client: {e}")
-            raise
-
-    try:
-        indexes = _pinecone_client.list_indexes().names()
-
-        if PINECONE_INDEX_NAME not in indexes:
-            logger.info(f"Creating new Pinecone index: {PINECONE_INDEX_NAME}")
-            _pinecone_client.create_index(
+            pc.create_index(
                 name=PINECONE_INDEX_NAME,
-                dimension=EMBEDDING_DIM,
+                dimension=384,  # matches paraphrase-multilingual-MiniLM-L12-v2 embedding size
                 metric="cosine",
-                spec=ServerlessSpec(
-                    cloud=PINECONE_CLOUD,
-                    region=PINECONE_REGION,
-                )
+                spec=ServerlessSpec(cloud=PINECONE_CLOUD, region=PINECONE_REGION),
             )
-            logger.info(f"Pinecone index '{PINECONE_INDEX_NAME}' created.")
-        else:
-            logger.info(f"Using existing Pinecone index: {PINECONE_INDEX_NAME}")
+            
+            # Wait for index to be ready
+            logger.info("Waiting for index to be ready...")
+            while True:
+                index_stats = pc.describe_index(PINECONE_INDEX_NAME)
+                if index_stats.status.ready:
+                    break
+                time.sleep(1)
+            logger.info("Index is ready!")
+            
+        except Exception as e:
+            logger.error(f"Failed to create index: {e}")
+            raise
+    else:
+        logger.info(f"Using existing index '{PINECONE_INDEX_NAME}'.")
 
-        return _pinecone_client.Index(PINECONE_INDEX_NAME)
+    return pc
 
-    except Exception as e:
-        logger.error(f"Failed to connect to Pinecone or manage index '{PINECONE_INDEX_NAME}': {e}")
-        raise
 
 def get_vector_store():
     """
     Returns an initialized LangchainPinecone vector store instance.
-    This function can be used for querying the vector store.
+    This function is used for querying the Pinecone vector store.
     """
     try:
-        index = init_pinecone()
-        embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
-        vector_store = LangchainPinecone(index=index, embedding=embeddings, text_key=TEXT_KEY)
-        logger.info(f"Successfully connected to LangchainPinecone vector store for index: {PINECONE_INDEX_NAME}")
+        _init_pinecone_index()
+        embeddings = HuggingFaceEmbeddings(
+            model_name=EMBEDDING_MODEL,
+            model_kwargs={'device': 'cpu'},
+            encode_kwargs={'normalize_embeddings': True}
+        )
+        
+        vector_store = LangchainPinecone.from_existing_index(
+            index_name=PINECONE_INDEX_NAME,
+            embedding=embeddings,
+            text_key=TEXT_KEY,
+        )
+        logger.info(f"Connected to Pinecone index: {PINECONE_INDEX_NAME}")
         return vector_store
     except Exception as e:
         logger.error(f"Could not get LangchainPinecone vector store: {e}")
         raise
 
+
 def save_vector_store(documents: List[Document]):
     """
-    Saves a list of Langchain Document objects to the Pinecone vector store using batching.
+    Saves already chunked documents to the Pinecone vector store in batches.
     """
     if not documents:
         logger.info("No documents provided to save to Pinecone. Skipping.")
         return
 
     try:
-        index = init_pinecone() # Get the Pinecone index object
-
-        # Chunk all documents first
-        chunks = chunk_documents(documents)
+        pc = _init_pinecone_index()
         
-        if not chunks:
-            logger.warning("Document chunking resulted in no chunks. No documents to save.")
-            return
-
-        logger.info(f"Preparing to save {len(chunks)} chunks to Pinecone.")
-
-        embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
+        # Get the index
+        index = pc.Index(PINECONE_INDEX_NAME)
         
-        # Initialize the LangchainPinecone vector store wrapper once
-        vector_store = LangchainPinecone(index=index, embedding=embeddings, text_key=TEXT_KEY)
+        # Clear existing data (optional - remove if you want to append)
+        logger.info("Clearing existing vectors from index...")
+        try:
+            # Check if index has any vectors first
+            index_stats = index.describe_index_stats()
+            if index_stats.total_vector_count > 0:
+                logger.info(f"Found {index_stats.total_vector_count} existing vectors, deleting...")
+                index.delete(delete_all=True)
+                # Wait a bit for deletion to complete
+                time.sleep(2)
+            else:
+                logger.info("Index is already empty, skipping deletion")
+        except Exception as e:
+            logger.warning(f"Could not clear existing vectors (this is OK for new indexes): {e}")
+        
+        embeddings = HuggingFaceEmbeddings(
+            model_name=EMBEDDING_MODEL,
+            model_kwargs={'device': 'cpu'},
+            encode_kwargs={'normalize_embeddings': True}
+        )
+        
+        # Create vector store and add documents
+        vector_store = LangchainPinecone(
+            index=index,
+            embedding=embeddings,
+            text_key=TEXT_KEY,
+        )
 
-        # Define a batch size for upserting
-        # Pinecone recommends 100 for optimal performance, though up to 1000 is allowed per call
-        # For memory, 100-200 is a good starting point if you have many large chunks or metadata
-        BATCH_SIZE = 100
-
-        # Batch the documents and add them
+        BATCH_SIZE = 50  # Reduced batch size for stability
         total_chunks_saved = 0
-        for i in range(0, len(chunks), BATCH_SIZE):
-            batch = chunks[i:i + BATCH_SIZE]
-            # The add_documents method of LangchainPinecone handles embedding and upserting the batch
-            vector_store.add_documents(batch)
-            total_chunks_saved += len(batch)
-            logger.info(f"Saved batch {i//BATCH_SIZE + 1} of {len(chunks) // BATCH_SIZE + 1} ({total_chunks_saved}/{len(chunks)} chunks saved)...")
+        
+        for i in range(0, len(documents), BATCH_SIZE):
+            batch = documents[i : i + BATCH_SIZE]
+            try:
+                vector_store.add_documents(batch)
+                total_chunks_saved += len(batch)
+                logger.info(
+                    f"Saved batch {i // BATCH_SIZE + 1} "
+                    f"({total_chunks_saved}/{len(documents)} chunks saved)"
+                )
+                # Small delay between batches
+                time.sleep(0.5)
+            except Exception as e:
+                logger.error(f"Failed to save batch {i // BATCH_SIZE + 1}: {e}")
+                # Continue with next batch
 
-        logger.info(f"Successfully saved all {total_chunks_saved} document chunks to Pinecone index '{PINECONE_INDEX_NAME}'.")
-
+        logger.info(
+            f"Saved {total_chunks_saved} chunks to index '{PINECONE_INDEX_NAME}'."
+        )
     except Exception as e:
-        logger.error(f"Failed to save documents to Pinecone index '{PINECONE_INDEX_NAME}': {e}")
+        logger.error(
+            f"Failed to save documents to Pinecone index '{PINECONE_INDEX_NAME}': {e}"
+        )
         raise
