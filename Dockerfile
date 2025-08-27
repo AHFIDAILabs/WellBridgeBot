@@ -13,7 +13,13 @@ COPY .env* ./
 
 # Install any needed packages specified in requirements.txt
 # Add ffmpeg for audio processing
-RUN apt-get update && apt-get install -y ffmpeg
+#RUN apt-get update && apt-get install -y ffmpeg
+#RUN pip install --no-cache-dir -r requirements.txt
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y ffmpeg git && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application's code into the container at /app
