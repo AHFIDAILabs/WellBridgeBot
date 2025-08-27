@@ -3,11 +3,11 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
 
 # LangChain ecosystem (older but consistent)
-langchain==0.1.20
-langchain-core==0.1.52
-langchain-community==0.0.38
+langchain==0.2.33
+langchain-core==0.2.33
+langchain-community==0.1.38
 langchain-openai==0.1.7
-langchain-pinecone==0.0.3
+langchain-pinecone==0.2.3
 langchain-huggingface==0.0.3
 
 # Embeddings
@@ -20,7 +20,7 @@ pinecone-client==3.2.2
 SpeechRecognition==3.10.0
 gTTS==2.4.0
 pydub==0.25.1
-whisper @ git+https://github.com/openai/whisper.git
+openai-whisper @ git+https://github.com/openai/whisper.git
 
 # Torch CPU
 torch==2.2.2
