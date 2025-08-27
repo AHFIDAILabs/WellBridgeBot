@@ -1,11 +1,14 @@
 # Requirements for the project: requirements.txt
 
+# Use PyTorch CPU wheels
+--index-url https://download.pytorch.org/whl/cpu
+
 # Core LLM and LangChain
 langchain==0.1.20
 langchain-core==0.1.52
 langchain-community==0.0.38
 langchain-openai==0.1.7
-langchain-pinecone==0.1.0
+langchain-pinecone==0.2.3
 langchain-huggingface==0.0.3
 
 # Embeddings
@@ -23,8 +26,8 @@ pydub==0.25.1
 openai-whisper==20231117
 
 # Torch (CPU-only)
-torch==2.2.2 --index-url https://download.pytorch.org/whl/cpu
-torchaudio==2.2.2 --index-url https://download.pytorch.org/whl/cpu
+torch==2.2.2
+torchaudio==2.2.2
 
 # Web search + API
 requests==2.31.0
@@ -44,66 +47,6 @@ langdetect==1.0.9
 numpy==1.26.4
 scikit-learn==1.4.2
 
-# Additional dependencies that might be missing
+# Additional dependencies
 markdown==3.6
 PyAudio==0.2.14
-
-### requirements.txt (updated and pinned)
-# streamlit==1.35.0
-# pinecone==3.0.0
-# langchain==0.1.16
-# langchain-core==0.1.52
-# langchain-community==0.0.32
-# langchain-pinecone==0.0.3
-# langchain-openai==0.1.7
-# python-dotenv==1.0.1
-# requests==2.32.2
-# pydub==0.25.1
-# SpeechRecognition==3.10.1
-# gTTS==2.5.1
-# huggingface_hub==0.23.3
-# sentence-transformers==2.6.1
-# pypdf==4.2.0
-# beautifulsoup4==4.12.3
-# unstructured==0.10.30
-# langdetect==1.0.9
-# numpy==1.26.4
-# torch==2.2.2
-# scikit-learn==1.4.2
-
-# # Core LLM and LangChain
-# langchain==0.2.12
-# langchain-core==0.2.26
-# langchain-community==0.2.10
-# langchain-openai==0.1.17
-# langchain-pinecone==0.0.8
-
-# # Embeddings
-# sentence-transformers==2.7.0
-
-# # Pinecone client
-# pinecone-client==3.2.2
-
-# # Audio processing
-# SpeechRecognition==3.10.4
-# gTTS==2.5.3
-# pydub==0.25.1
-
-# # Whisper for sturdier speech recognition
-# openai-whisper==20231117
-
-# # Torch (choose one: CPU-only or GPU)
-# # CPU:
-# torch==2.2.2 --index-url https://download.pytorch.org/whl/cpu
-# # GPU (if CUDA 11.8 is available, comment CPU line above and uncomment below):
-# # torch==2.2.2 --index-url https://download.pytorch.org/whl/cu118
-
-# # Web search + API
-# requests==2.31.0
-
-# # App UI
-# streamlit==1.36.0
-
-# # Utilities
-# tqdm==4.66.2
-# python-dotenv==1.0.1
