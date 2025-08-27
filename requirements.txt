@@ -20,7 +20,7 @@ pinecone-client==3.2.2
 SpeechRecognition==3.10.0
 gTTS==2.4.0
 pydub==0.25.1
-openai-whisper @ git+https://github.com/openai/whisper.git
+openai-whisper@ git+https://github.com/openai/whisper.git
 
 # Torch CPU
 torch==2.2.2
