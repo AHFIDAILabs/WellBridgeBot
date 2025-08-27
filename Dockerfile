@@ -7,8 +7,9 @@ WORKDIR /app
 # Copy the requirements file into the container at /app
 COPY requirements.txt .
 
-# Add this line to copy env vars if using local builds
-COPY .env .env
+# Add this line to copy env vars if using local builds (file if it exists (for local development))
+#COPY .env .env
+COPY .env* ./
 
 # Install any needed packages specified in requirements.txt
 # Add ffmpeg for audio processing
