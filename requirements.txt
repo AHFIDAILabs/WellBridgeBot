@@ -1,7 +1,6 @@
 # Requirements for the project: requirements.txt
 
-# Use PyTorch CPU wheels
---index-url https://download.pytorch.org/whl/cpu
+--extra-index-url https://download.pytorch.org/whl/cpu
 
 # Core LLM and LangChain
 langchain==0.1.20
