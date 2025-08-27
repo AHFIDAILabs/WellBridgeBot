@@ -2,12 +2,12 @@
 
 --extra-index-url https://download.pytorch.org/whl/cpu
 
-# LangChain ecosystem (older but consistent)
-langchain==0.2.33
-langchain-core==0.2.33
-langchain-community==0.1.38
+# LangChain ecosystem (Python 3.9 compatible versions)
+langchain==0.1.20
+langchain-core==0.1.52
+langchain-community==0.0.38
 langchain-openai==0.1.7
-langchain-pinecone==0.2.3
+langchain-pinecone==0.1.3
 langchain-huggingface==0.0.3
 
 # Embeddings
