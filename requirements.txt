@@ -1,13 +1,12 @@
 # Requirements for the project: requirements.txt
-
 --extra-index-url https://download.pytorch.org/whl/cpu
 
-# LangChain ecosystem (Python 3.9 compatible versions)
-langchain==0.1.20
-langchain-core==0.1.52
-langchain-community==0.0.38
+# LangChain ecosystem (older but consistent)
+langchain==0.2.33
+langchain-core==0.2.33
+langchain-community==0.1.38
 langchain-openai==0.1.7
-langchain-pinecone==0.1.3
+langchain-pinecone==0.2.3
 langchain-huggingface==0.0.3
 
 # Embeddings
@@ -29,7 +28,8 @@ torchaudio==2.2.2
 # Web + utilities
 requests==2.31.0
 streamlit==1.34.0
-streamlit-audiorec==0.0.5
+streamlit-audiorec>=0.1.0 # streamlit-audiorec==0.0.5  # Removed - package not available
+#st-audiorec>=0.0.3  # Alternative audio recorder for Streamlit
 tqdm==4.66.4
 python-dotenv==1.0.1
 huggingface_hub==0.23.0
@@ -42,4 +42,4 @@ scikit-learn==1.4.2
 
 # Extras
 markdown==3.6
-PyAudio==0.2.14
+# PyAudio==0.2.14  # Commented out - may cause issues in Docker
