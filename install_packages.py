@@ -35,7 +35,7 @@ def main():
         "langchain-pinecone==0.1.0",
         "langchain-huggingface==0.0.3",
     ]
-    
+
     # ML/AI packages
     ml_packages = [
         "sentence-transformers==2.7.0",

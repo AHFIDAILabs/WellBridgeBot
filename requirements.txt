@@ -1,45 +1,47 @@
-# Requirements for the project: requirements.txt
 --extra-index-url https://download.pytorch.org/whl/cpu
-
-# LangChain ecosystem (older but consistent)
-langchain==0.2.33
-langchain-core==0.2.33
-langchain-community==0.1.38
-langchain-openai==0.1.7
-langchain-pinecone==0.2.3
-langchain-huggingface==0.0.3
-
-# Embeddings
-sentence-transformers==2.7.0
-
-# Pinecone client
-pinecone-client==3.2.2
-
-# Audio processing
-SpeechRecognition==3.10.0
-gTTS==2.4.0
-pydub==0.25.1
-openai-whisper@ git+https://github.com/openai/whisper.git
 
 # Torch CPU
 torch==2.2.2
 torchaudio==2.2.2
 
-# Web + utilities
-requests==2.31.0
-streamlit==1.34.0
-streamlit-audiorec>=0.1.0 # streamlit-audiorec==0.0.5  # Removed - package not available
-#st-audiorec>=0.0.3  # Alternative audio recorder for Streamlit
-tqdm==4.66.4
+# core packages
 python-dotenv==1.0.1
+requests==2.31.0
+numpy==1.26.4
+tqdm==4.66.4
+
+# LangChain packages
+langchain-core==0.1.52
+langchain==0.1.20
+langchain-community==0.0.38
+langchain-openai==0.1.7
+langchain-pinecone==0.1.0
+langchain-huggingface==0.0.3
+
+# ML/AI packages
+sentence-transformers==2.7.0
+scikit-learn==1.4.2
 huggingface_hub==0.23.0
+
+# Vector database
+pinecone-client>=3.0.0
+
+# Document processing
 pypdf==4.2.0
 beautifulsoup4==4.12.3
 unstructured==0.13.7
 langdetect==1.0.9
-numpy==1.26.4
-scikit-learn==1.4.2
-
-# Extras
 markdown==3.6
-# PyAudio==0.2.14  # Commented out - may cause issues in Docker
+
+# Audio packages
+SpeechRecognition==3.10.0
+gTTS==2.4.0
+pydub==0.25.1
+
+# Streamlit packages
+streamlit>=1.30.0
+streamlit-audiorec>=0.1.0
+
+# Optional packages (install last)
+openai-whisper
+
