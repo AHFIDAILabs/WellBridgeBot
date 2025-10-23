@@ -3,7 +3,7 @@ import os
 import tempfile
 import zipfile
 import logging
-from typing import List
+from typing import List, Optional
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import (
@@ -12,7 +12,74 @@ from langchain_community.document_loaders import (
     UnstructuredMarkdownLoader
 )
 
+try:
+    from huggingface_hub import hf_hub_download
+except ImportError:
+    hf_hub_download = None
+
 logger = logging.getLogger(__name__)
+
+def load_documents_from_huggingface(
+    repo_id: str = "AHFIDAILabs/tb-knowledge-base",
+    filename: str = "TB_knowledge_base.zip",
+    token: Optional[str] = None,
+    max_retries: int = 3
+) -> List[Document]:
+    """
+    Downloads and loads documents from a HuggingFace repository.
+    Extracts and processes files from a ZIP archive.
+    
+    Args:
+        repo_id: HuggingFace repository ID
+        filename: Name of the ZIP file in the repository
+        token: HuggingFace API token (if needed for private repos)
+        max_retries: Maximum number of download attempts
+    
+    Returns:
+        List of loaded documents
+    """
+    documents = []
+    
+    if hf_hub_download is None:
+        logger.error("huggingface-hub package not found. Install with: pip install huggingface-hub")
+        raise ImportError("huggingface-hub is required but not installed")
+    
+    import time
+    
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"Downloading {filename} from HuggingFace: {repo_id} (attempt {attempt + 1}/{max_retries})")
+            
+            zip_file_path = hf_hub_download(
+                repo_id=repo_id,
+                filename=filename,
+                repo_type="dataset",
+                token=token,
+                resume_download=True
+            )
+            
+            logger.info(f"Successfully downloaded to: {zip_file_path}")
+            
+            # Process the downloaded ZIP file
+            documents = load_documents_from_zip(zip_file_path)
+            
+            return documents
+            
+        except Exception as e:
+            logger.warning(f"Download attempt {attempt + 1} failed: {type(e).__name__}: {str(e)[:200]}")
+            
+            if attempt < max_retries - 1:
+                wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                logger.info(f"Retrying in {wait_time} seconds...")
+                time.sleep(wait_time)
+            else:
+                logger.error(f"All {max_retries} download attempts failed.")
+                logger.error("Possible causes:")
+                logger.error("1. Network connectivity issue")
+                logger.error("2. Repository access denied")
+                logger.error("3. File not found in repository")
+                logger.error(f"Repository: https://huggingface.co/datasets/{repo_id}")
+                raise
 
 def load_documents_from_zip(zip_file_path: str) -> List[Document]:
     """
