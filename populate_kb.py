@@ -1,5 +1,4 @@
 # populate_kb.py: populate knowledge base from ZIP file
-# populate_kb.py
 import sys
 import logging
 import os
@@ -9,9 +8,15 @@ from pathlib import Path
 current_dir = Path(__file__).parent.absolute()
 sys.path.insert(0, str(current_dir))
 
-from modules.knowledge_base_manager import load_documents_from_zip, chunk_documents
+from modules.knowledge_base_manager import load_documents_from_huggingface, load_documents_from_zip, chunk_documents
 from modules.vector_store_manager import save_vector_store
-from modules.utils import get_file_hash, save_last_kb_hash
+from modules.utils import get_file_hash, save_last_kb_hash, load_last_kb_hash
+
+# Fix Windows console encoding issues BEFORE setting up logging
+if sys.platform.startswith('win'):
+    import codecs
+    # Use a safer approach: set encoding on the handler instead of detaching stdout
+    sys.stdout.reconfigure(encoding='utf-8')
 
 # Set up logging with UTF-8 encoding to handle special characters
 logging.basicConfig(
@@ -22,32 +27,84 @@ logging.basicConfig(
     ]
 )
 
-# Fix Windows console encoding issues
-if sys.platform.startswith('win'):
-    import codecs
-    sys.stdout = codecs.getwriter('utf-8')(sys.stdout.detach())
 logger = logging.getLogger(__name__)
 
-def main(zip_path):
-    """Main function to populate the knowledge base from a ZIP file."""
+def main(zip_path=None):
+    """Main function to populate the knowledge base from HuggingFace or local ZIP."""
     try:
-        # Validate input
-        if not os.path.exists(zip_path):
-            logger.error(f"ZIP file not found: {zip_path}")
-            sys.exit(1)
+        documents = None
+        current_hash = None
         
-        if not zip_path.lower().endswith('.zip'):
-            logger.error(f"File must be a ZIP file: {zip_path}")
-            sys.exit(1)
+        # Try to load from HuggingFace first
+        if not zip_path:
+            logger.info("Step 0: Checking if knowledge base needs updating...")
+            logger.info("Attempting to download from HuggingFace...")
+            
+            try:
+                from huggingface_hub import hf_hub_download
+                
+                temp_zip_path = hf_hub_download(
+                    repo_id="AHFIDAILabs/tb-knowledge-base",
+                    filename="TB_knowledge_base.zip",
+                    repo_type="dataset"
+                )
+                
+                current_hash = get_file_hash(temp_zip_path)
+                last_hash = load_last_kb_hash()
+                
+                if current_hash == last_hash:
+                    logger.info("Knowledge base is up-to-date. No changes detected.")
+                    logger.info("Skipping vector store update.")
+                    return
+                
+                logger.info("New data detected. Updating knowledge base...")
+                logger.info("Step 1: Loading documents from HuggingFace repository...")
+                documents = load_documents_from_huggingface()
+                
+            except Exception as e:
+                logger.warning(f"Failed to download from HuggingFace: {e}")
+                logger.info("Falling back to local ZIP file if available...")
+                
+                # Try to find local ZIP file
+                if os.path.exists("data/TB_knowledge_base.zip"):
+                    zip_path = "data/TB_knowledge_base.zip"
+                    logger.info(f"Found local ZIP file: {zip_path}")
+                elif os.path.exists("TB_knowledge_base.zip"):
+                    zip_path = "TB_knowledge_base.zip"
+                    logger.info(f"Found local ZIP file: {zip_path}")
+                else:
+                    logger.error("Could not reach HuggingFace and no local ZIP file found.")
+                    logger.error("Please ensure internet connection or provide a local ZIP file.")
+                    sys.exit(1)
         
-        logger.info(f"Starting knowledge base population from: {zip_path}")
-        
-        # Step 1: Load documents from ZIP
-        logger.info("Step 1: Loading documents from ZIP file...")
-        documents = load_documents_from_zip(zip_path)
+        # Load from local ZIP file if specified or if HuggingFace failed
+        if zip_path and not documents:
+            if not os.path.exists(zip_path):
+                logger.error(f"ZIP file not found: {zip_path}")
+                sys.exit(1)
+            
+            if not zip_path.lower().endswith('.zip'):
+                logger.error(f"File must be a ZIP file: {zip_path}")
+                sys.exit(1)
+            
+            logger.info(f"Loading from local ZIP file: {zip_path}")
+            
+            # Check hash for local file
+            logger.info("Step 0: Checking if knowledge base needs updating...")
+            current_hash = get_file_hash(zip_path)
+            last_hash = load_last_kb_hash()
+            
+            if current_hash == last_hash:
+                logger.info("Knowledge base is up-to-date. No changes detected.")
+                logger.info("Skipping vector store update.")
+                return
+            
+            logger.info("New data detected. Updating knowledge base...")
+            logger.info("Step 1: Loading documents from ZIP file...")
+            documents = load_documents_from_zip(zip_path)
 
         if not documents:
-            logger.error("No documents found in the ZIP file or all documents failed to load.")
+            logger.error("No documents found or all documents failed to load.")
             logger.info("Supported file types: .pdf, .txt, .md")
             sys.exit(1)
 
@@ -68,11 +125,11 @@ def main(zip_path):
         save_vector_store(chunked_docs)
         logger.info("Vector store update completed successfully")
 
-        # Step 4: Save hash for future comparison
-        logger.info("Step 4: Updating hash record...")
-        new_hash = get_file_hash(zip_path)
-        save_last_kb_hash(new_hash)
-        logger.info(f"Hash record updated: {new_hash}")
+        # Step 4: Update hash record
+        if current_hash:
+            logger.info("Step 4: Updating hash record...")
+            save_last_kb_hash(current_hash)
+            logger.info(f"Hash record updated: {current_hash}")
 
         logger.info("Knowledge base population completed successfully!")
         
@@ -84,19 +141,20 @@ def main(zip_path):
         sys.exit(1)
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        logger.error("Usage: python populate_kb.py <path_to_zip_file>")
-        logger.info("Example: python populate_kb.py data/health_documents.zip")
-        sys.exit(1)
-
-    zip_path = sys.argv[1]
+    zip_path = None
     
-    # Convert to absolute path
-    zip_path = os.path.abspath(zip_path)
+    if len(sys.argv) > 1:
+        zip_path = sys.argv[1]
+        # Convert to absolute path
+        zip_path = os.path.abspath(zip_path)
     
     logger.info(f"Python executable: {sys.executable}")
     logger.info(f"Current working directory: {os.getcwd()}")
     logger.info(f"Script location: {__file__}")
-    logger.info(f"Target ZIP file: {zip_path}")
+    
+    if zip_path:
+        logger.info(f"Using provided ZIP file: {zip_path}")
+    else:
+        logger.info("No ZIP file provided. Will attempt HuggingFace download.")
     
     main(zip_path)
