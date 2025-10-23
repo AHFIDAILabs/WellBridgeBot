@@ -6,7 +6,8 @@ from langchain_openai import ChatOpenAI
 from langchain.chains import RetrievalQA
 from langchain_core.prompts import PromptTemplate
 from langchain_core.messages import HumanMessage
-from langchain_community.tools import DuckDuckGoSearchRun
+from langchain_community.utilities import DuckDuckGoSearchAPIWrapper
+from langchain_community.tools import DuckDuckGoSearchResults
 
 from modules.language_utils import (
     detect_language, is_pidgin, get_language_name
@@ -165,49 +166,86 @@ Detailed Answer:"""
 
 
 def calculate_result_quality_score(result_text: str, sources: List, query: str) -> float:
-    """Score KB search results for relevance and completeness."""
+    """Score KB search results for relevance and completeness.
+    
+    STRICT SCORING: Higher threshold ensures we only use KB when we have good answers.
+    This forces fallback to web search when KB results are weak.
+    """
     score = 0.0
 
     if not result_text or len(result_text.strip()) < 10:
         return 0.0
 
-    # Length scoring
+    # CRITICAL: Strong negative indicators mean KB doesn't have the answer
+    strong_negatives = [
+        "don't know", "not sure", "cannot answer", "insufficient information",
+        "not enough information", "context does not contain", "i don't have",
+        "unable to answer", "no information", "not available in"
+    ]
+    
+    result_lower = result_text.lower()
+    if any(ind in result_lower for ind in strong_negatives):
+        logger.info(f"KB result contains negative indicator - forcing web search fallback")
+        return 0.0  # Force web search by returning score below threshold
+
+    # Length scoring (good answers have substance)
     text_length = len(result_text.strip())
-    if 50 <= text_length <= 400:
+    if 100 <= text_length <= 500:
+        score += 4.0  # Increased for substantial answers
+    elif 50 <= text_length < 100:
+        score += 2.0
+    elif text_length > 500:
         score += 3.0
-    elif 20 <= text_length < 50:
+    elif text_length < 50:
+        score += 0.5  # Very short answers are suspect
+
+    # Source documents (KB should have sources)
+    if sources and len(sources) >= 2:
+        score += 3.0
+    elif sources and len(sources) == 1:
         score += 1.5
-    elif text_length > 400:
-        score += 2.0
-
-    # Source docs
-    if sources:
-        score += min(len(sources), 3)
-
-    # Negative indicators
-    negatives = ["don't know", "not sure", "cannot answer", "insufficient information"]
-    if any(ind in result_text.lower() for ind in negatives):
-        score -= 5.0
     else:
-        score += 2.0
+        score -= 2.0  # No sources is bad
 
-    # TB relevance
-    tb_keywords = ["tuberculosis", "TB", "infection", "treatment", "symptoms", "prevention", "lungs"]
-    tb_matches = sum(1 for kw in tb_keywords if kw.lower() in result_text.lower())
-    score += min(tb_matches * 0.5, 3.0)
+    # Positive content indicators
+    score += 2.0  # Base positive score
 
-    # Query overlap
-    query_words = set(query.lower().split())
-    result_words = set(result_text.lower().split())
+    # TB relevance (must be TB-related)
+    tb_keywords = ["tuberculosis", "tb", "infection", "treatment", "symptoms", 
+                   "prevention", "lungs", "bacteria", "disease", "diagnosis"]
+    tb_matches = sum(1 for kw in tb_keywords if kw.lower() in result_lower)
+    
+    if tb_matches >= 3:
+        score += 3.0  # Strong TB relevance
+    elif tb_matches >= 1:
+        score += 1.5
+    else:
+        score -= 2.0  # Not TB-related is suspicious
+
+    # Query overlap (answer should address the query)
+    query_words = set(w.lower() for w in query.split() if len(w) > 3)
+    result_words = set(w.lower() for w in result_text.split())
     overlap = query_words.intersection(result_words)
+    
     if query_words:
-        score += (len(overlap) / len(query_words)) * 2.0
+        overlap_ratio = len(overlap) / len(query_words)
+        if overlap_ratio >= 0.5:
+            score += 3.0
+        elif overlap_ratio >= 0.3:
+            score += 1.5
+        else:
+            score -= 1.0
 
+    logger.info(f"Detailed score breakdown: length={text_length}, sources={len(sources) if sources else 0}, tb_matches={tb_matches}, final_score={score:.2f}")
+    
     return score
 
 
 def search_kb_with_multiple_strategies(query_variations: List[str], vector_store) -> Dict[str, Any]:
-    """Try multiple KB search strategies and return the best scored result."""
+    """Try multiple KB search strategies and return the best scored result.
+    
+    STRICT MODE: Only returns results that meet quality threshold.
+    """
     best_result = None
     best_score = 0
 
@@ -219,7 +257,7 @@ def search_kb_with_multiple_strategies(query_variations: List[str], vector_store
             sources = response.get("source_documents", [])
 
             score = calculate_result_quality_score(result_text, sources, variation)
-            logger.info(f"KB search score for '{variation}': {score:.2f}")
+            logger.info(f"KB search score for '{variation[:50]}...': {score:.2f}")
 
             if score > best_score:
                 best_score = score
@@ -239,41 +277,88 @@ def search_kb_with_multiple_strategies(query_variations: List[str], vector_store
 # ------------------- Web Search Fallback -------------------
 
 def web_search_fallback(query: str, target_lang: str) -> str:
-    """Fallback using DuckDuckGo search for TB info."""
+    """IMPROVED: Real-time web search fallback using DuckDuckGo for TB info.
+    
+    Uses updated API wrapper for reliable real-time search results.
+    """
     try:
-        search = DuckDuckGoSearchRun()
-        search_query = f"{query} tuberculosis site:who.int OR site:cdc.gov OR site:nhs.uk"
-        results = search.run(search_query)
+        logger.info(f"Starting web search for query: '{query[:50]}...'")
+        
+        # Use the API wrapper for more reliable results
+        wrapper = DuckDuckGoSearchAPIWrapper(
+            max_results=5,
+            region="wt-wt",  # Worldwide
+            safesearch="moderate",
+            time="y"  # Past year for recent information
+        )
+        
+        # Enhanced search query for TB-specific medical sources
+        search_terms = f"tuberculosis {query} site:who.int OR site:cdc.gov OR site:nhs.uk OR site:mayoclinic.org"
+        
+        logger.info(f"Search terms: {search_terms}")
+        
+        # Perform the search
+        results = wrapper.run(search_terms)
+        
+        if not results or len(results.strip()) < 20:
+            logger.warning("Web search returned insufficient results, trying broader search")
+            # Try broader search without site restrictions
+            search_terms = f"tuberculosis {query} health medical"
+            results = wrapper.run(search_terms)
+        
+        if not results or len(results.strip()) < 20:
+            logger.error("Web search failed to return usable results")
+            return "I couldn't find current information online. Please consult a healthcare professional for the most accurate information."
 
-        if not results:
-            return "No relevant information found online."
+        logger.info(f"Web search returned {len(results)} characters of results")
 
+        # Summarize the search results using LLM
         llm = get_llm()
-        summary_prompt = f"""
-        Summarize the following search results into accurate, clear health information
-        about tuberculosis (TB). Keep the facts correct and concise.
-        Do not invent data. Aim for 3-5 sentences.
+        summary_prompt = f"""You are a tuberculosis (TB) health expert. Based on the following search results, 
+provide a clear, accurate, and helpful answer to the user's question.
 
-        Results:
-        {results}
+User's Question: {query}
 
-        Summary:"""
+Search Results:
+{results}
+
+Instructions:
+- Provide factual, medically accurate information
+- Be specific and actionable when possible
+- Keep the response between 100-300 words
+- Focus on tuberculosis-related information
+- Do not invent information not in the search results
+- If the results don't contain relevant TB information, say so
+
+Answer:"""
+        
         response = llm.invoke([HumanMessage(content=summary_prompt)])
         summary = response.content.strip()
+        
+        logger.info(f"Generated summary: {summary[:100]}...")
 
+        # Translate if needed
         if target_lang != "en":
+            logger.info(f"Translating web search result to {get_language_name(target_lang)}")
             summary = translate_from_english(summary, target_lang)
 
         return summary
+        
     except Exception as e:
-        logger.error(f"Web search fallback failed: {e}")
-        return "Unable to fetch updated information at this time."
+        logger.error(f"Web search fallback failed: {e}", exc_info=True)
+        return "Unable to fetch current information at this time. Please try again or consult a healthcare professional."
 
 
 # ------------------- Main Response -------------------
 
 def get_response(query: str, vector_store) -> Dict[str, Any]:
-    """Main function to get multilingual responses."""
+    """Main function to get multilingual responses.
+    
+    STRICT CONTROL FLOW:
+    1. ALWAYS try vector store FIRST
+    2. ONLY use web search if vector store score < MIN_SCORE
+    3. NEVER skip vector store
+    """
     try:
         # Detect the language of the query
         detected_lang = detect_language(query)
@@ -290,27 +375,37 @@ def get_response(query: str, vector_store) -> Dict[str, Any]:
         # The target language for response should match the query language
         target_lang = detected_lang
         
-        logger.info(f"Query: '{query[:50]}...'")
-        logger.info(f"Raw detected language: {detect_language(query)}")
-        logger.info(f"Final detected language: {detected_lang} ({get_language_name(detected_lang)})")
-        logger.info(f"Target response language: {target_lang} ({get_language_name(target_lang)})")
+        logger.info(f"=" * 70)
+        logger.info(f"NEW QUERY PROCESSING")
+        logger.info(f"Query: '{query[:100]}...'")
+        logger.info(f"Detected language: {detected_lang} ({get_language_name(detected_lang)})")
+        logger.info(f"Target response language: {target_lang}")
+        logger.info(f"=" * 70)
 
-        # Create search variations
+        # STEP 1: ALWAYS search knowledge base FIRST
+        logger.info("STEP 1: Searching vector store (knowledge base)...")
         search_variations = create_multilingual_search_variations(query, detected_lang)
+        logger.info(f"Search variations: {search_variations}")
         
-        # Search knowledge base
         kb_result = search_kb_with_multiple_strategies(search_variations, vector_store)
 
+        # STEP 2: Evaluate KB result quality
         if kb_result:
-            logger.info(f"Best KB score: {kb_result['score']:.2f} | Threshold: {MIN_SCORE:.2f}")
+            kb_score = kb_result["score"]
+            logger.info(f"STEP 2: KB search completed. Score: {kb_score:.2f} | Threshold: {MIN_SCORE:.2f}")
+        else:
+            kb_score = 0.0
+            logger.info(f"STEP 2: KB search returned no results")
 
-        if kb_result and kb_result["score"] >= MIN_SCORE:
-            logger.info("Decision: Using KB result (above threshold)")
+        # STEP 3: Decision point - KB or Web Search
+        if kb_result and kb_score >= MIN_SCORE:
+            # USE KNOWLEDGE BASE RESULT
+            logger.info(f"✓ DECISION: Using KB result (score {kb_score:.2f} >= threshold {MIN_SCORE:.2f})")
             answer = kb_result["result"].strip()
             
             # Translate the answer to the target language if needed
             if target_lang != "en":
-                logger.info(f"Translating response from English to {get_language_name(target_lang)}")
+                logger.info(f"Translating KB response from English to {get_language_name(target_lang)}")
                 answer = translate_from_english(answer, target_lang)
 
             sources = kb_result.get("source_documents", [])
@@ -322,20 +417,25 @@ def get_response(query: str, vector_store) -> Dict[str, Any]:
             if filenames:
                 source_info += f" ({', '.join(set(filenames))})"
 
+            logger.info(f"Final answer source: {source_info}")
+            logger.info(f"=" * 70)
+
             return {
                 "source": source_info,
                 "answer": answer,
                 "lang": target_lang,
                 "detected_lang": detected_lang
             }
-
-        # Fallback to web search
-        if kb_result:
-            logger.info(f"Decision: KB insufficient (score {kb_result['score']:.2f} < threshold {MIN_SCORE:.2f}), using internet fallback")
-        else:
-            logger.info("Decision: No KB result available, using internet fallback")
-
+        
+        # USE WEB SEARCH FALLBACK
+        logger.info(f"✗ DECISION: KB insufficient (score {kb_score:.2f} < threshold {MIN_SCORE:.2f})")
+        logger.info("STEP 3: Activating web search fallback...")
+        
         fallback_answer = web_search_fallback(query, target_lang)
+        
+        logger.info(f"Web search completed. Answer length: {len(fallback_answer)} chars")
+        logger.info(f"Final answer source: internet_search")
+        logger.info(f"=" * 70)
 
         return {
             "source": "internet_search",
@@ -345,7 +445,7 @@ def get_response(query: str, vector_store) -> Dict[str, Any]:
         }
 
     except Exception as e:
-        logger.error(f"Error in get_response: {e}", exc_info=True)
+        logger.error(f"CRITICAL ERROR in get_response: {e}", exc_info=True)
         return {
             "source": "error",
             "answer": "An error occurred while processing your question. Please try again.",
