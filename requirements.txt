@@ -1,47 +1,52 @@
+# Core PyTorch (CPU version)
 --extra-index-url https://download.pytorch.org/whl/cpu
-
-# Torch CPU
 torch==2.2.2
 torchaudio==2.2.2
 
-# core packages
+# Environment & Utilities
 python-dotenv==1.0.1
 requests==2.31.0
 numpy==1.26.4
 tqdm==4.66.4
 
-# LangChain packages
+# LangChain Core (WITHOUT langchain-huggingface to avoid conflicts)
 langchain-core==0.1.52
 langchain==0.1.20
 langchain-community==0.0.38
 langchain-openai==0.1.7
 langchain-pinecone==0.1.0
-langchain-huggingface==0.0.3
 
-# ML/AI packages
-sentence-transformers==2.7.0
+# Hugging Face & Transformers (STABLE VERSIONS)
+transformers>=4.35.0
+tokenizers>=0.19.1
+huggingface_hub>=0.20.0
+sentence-transformers>=2.2.0
 scikit-learn==1.4.2
-huggingface_hub==0.23.0
 
-# Vector database
+# Vector Database
 pinecone-client>=3.0.0
 
-# Document processing
+# Document Processing
 pypdf==4.2.0
 beautifulsoup4==4.12.3
 unstructured==0.13.7
 langdetect==1.0.9
 markdown==3.6
 
-# Audio packages
+# Audio Processing
 SpeechRecognition==3.10.0
 gTTS==2.4.0
 pydub==0.25.1
 
-# Streamlit packages
+# Streamlit UI
 streamlit>=1.30.0
 streamlit-audiorec>=0.1.0
 
-# Optional packages (install last)
+# Speech-to-Text
 openai-whisper
 
+# Meta MMS dependencies
+accelerate>=0.20.0
+datasets>=2.14.0
+soundfile>=0.12.1
+librosa>=0.10.0
