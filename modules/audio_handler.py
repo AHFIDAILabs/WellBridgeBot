@@ -10,6 +10,33 @@ from modules.language_utils import detect_language, is_pidgin, get_language_name
 
 logger = logging.getLogger(__name__)
 
+# N-ATLAS setup for Nigerian languages
+try:
+    from transformers import pipeline
+    import librosa
+    
+    # Initialize N-ATLAS ASR pipelines for Nigerian languages
+    NATLAS_MODELS = {
+        "ha": "NCAIR1/Hausa-ASR",
+        "ig": "NCAIR1/Igbo-ASR",
+        "yo": "NCAIR1/Yoruba-ASR"
+    }
+    
+    NATLAS_PIPELINES = {}
+    for lang_code, model_name in NATLAS_MODELS.items():
+        try:
+            NATLAS_PIPELINES[lang_code] = pipeline("automatic-speech-recognition", model=model_name)
+            logger.info(f"N-ATLAS {lang_code.upper()} model loaded: {model_name}")
+        except Exception as e:
+            logger.warning(f"Could not load N-ATLAS {lang_code.upper()} model: {e}")
+    
+    USE_NATLAS = len(NATLAS_PIPELINES) > 0
+    logger.info(f"N-ATLAS available for languages: {list(NATLAS_PIPELINES.keys())}")
+except Exception as e:
+    USE_NATLAS = False
+    NATLAS_PIPELINES = {}
+    logger.warning(f"N-ATLAS not available: {e}")
+
 # Whisper setup
 try:
     import whisper
@@ -24,7 +51,8 @@ except Exception as e:
 def speech_to_text(audio_file_path: str) -> str:
     """
     Efficient multilingual speech-to-text for Nigerian languages.
-    First detects language, then transcribes in that specific language.
+    Priority: N-ATLAS -> Whisper -> Google Speech Recognition
+    First detects language, then transcribes using the best available method.
     """
     if not os.path.isfile(audio_file_path):
         logger.error(f"Audio file not found: {audio_file_path}")
@@ -64,22 +92,39 @@ def speech_to_text(audio_file_path: str) -> str:
                         detected_lang = "pidgin"
                 
                 logger.info(f"Detected language: {detected_lang} ({get_language_name(detected_lang)})")
-                
-                # If we got good transcription already, use it
-                if initial_text and len(initial_text) > 2:
-                    logger.info(f"Using initial transcription: '{initial_text[:50]}...'")
-                    return initial_text
                     
             except Exception as e:
                 logger.warning(f"Language detection failed: {e}")
                 detected_lang = "en"  # Default to English
         
-        # Step 2: Targeted Transcription based on detected language
+        # Step 2: Try N-ATLAS for Nigerian languages (Hausa, Igbo, Yoruba)
+        if detected_lang and detected_lang in NATLAS_PIPELINES:
+            try:
+                logger.info(f"Attempting N-ATLAS transcription for {get_language_name(detected_lang)}...")
+                
+                # Load audio file at 16kHz (recommended for N-ATLAS)
+                audio, sr = librosa.load(audio_file_path, sr=16000)
+                
+                # Transcribe using N-ATLAS
+                asr_pipeline = NATLAS_PIPELINES[detected_lang]
+                result = asr_pipeline(audio)
+                text = result.get("text", "").strip()
+                
+                if text and len(text) > 2:
+                    logger.info(f"N-ATLAS transcription successful: '{text[:50]}...'")
+                    return text
+                else:
+                    logger.warning("N-ATLAS returned empty or very short transcription")
+                    
+            except Exception as e:
+                logger.warning(f"N-ATLAS transcription failed: {e}")
+        
+        # Step 3: Try Whisper as fallback for targeted transcription
         if detected_lang:
             # Try targeted transcription with detected language
             if USE_WHISPER and detected_lang in ["yo", "ig", "ha", "en"]:
                 try:
-                    logger.info(f"Transcribing audio specifically as {get_language_name(detected_lang)}...")
+                    logger.info(f"Transcribing audio with Whisper as {get_language_name(detected_lang)}...")
                     
                     # For Nigerian languages, try specific language hint
                     if detected_lang != "en":
@@ -100,14 +145,15 @@ def speech_to_text(audio_file_path: str) -> str:
                     
                     text = result.get("text", "").strip()
                     if text and len(text) > 2:
-                        logger.info(f"Transcribed as {get_language_name(detected_lang)}: '{text[:50]}...'")
+                        logger.info(f"Whisper transcription successful: '{text[:50]}...'")
                         return text
                         
                 except Exception as e:
-                    logger.warning(f"Targeted transcription failed: {e}")
+                    logger.warning(f"Whisper transcription failed: {e}")
             
-            # Fallback to Google Speech Recognition with detected language
+            # Step 4: Fallback to Google Speech Recognition with detected language
             try:
+                import speech_recognition as sr
                 r = sr.Recognizer()
                 r.energy_threshold = 300
                 r.dynamic_energy_threshold = True
@@ -140,10 +186,10 @@ def speech_to_text(audio_file_path: str) -> str:
             except Exception as e:
                 logger.error(f"Google Speech setup failed: {e}")
         
-        # Step 3: If all else fails, try general auto-detection
+        # Step 5: Final fallback - try general auto-detection with Whisper
         if USE_WHISPER:
             try:
-                logger.info("Attempting final transcription with auto-detection...")
+                logger.info("Attempting final Whisper transcription with auto-detection...")
                 result = WHISPER_MODEL.transcribe(
                     audio_file_path,
                     fp16=False,
@@ -151,6 +197,7 @@ def speech_to_text(audio_file_path: str) -> str:
                 )
                 text = result.get("text", "").strip()
                 if text and len(text) > 2:
+                    logger.info(f"Final Whisper transcription successful: '{text[:50]}...'")
                     return text
             except Exception as e:
                 logger.error(f"Final transcription attempt failed: {e}")
