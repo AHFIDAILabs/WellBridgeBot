@@ -1,7 +1,7 @@
 # Core PyTorch (CPU version)
 --extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.2.2
-torchaudio==2.2.2
+torch==2.9.0
+torchaudio==2.9.0
 
 # Environment & Utilities
 python-dotenv==1.0.1
