@@ -178,6 +178,31 @@ else:
 # --- Sidebar for Tools (Voice Recorder) ---
 with st.sidebar:
     st.header("🎤 Voice Tools")
+    
+    # Language selection
+    st.markdown("**Select your language:**")
+    if "selected_language" not in st.session_state:
+        print("language set")
+        st.session_state.selected_language = "Auto-detect"
+    
+    language_options = {
+        "Auto-detect": "auto",
+        "Hausa": "ha",
+        "Yoruba": "yo",
+        "Igbo": "ig",
+        "Pidgin": "pcm",
+        "English": "en"
+    }
+    
+    selected_lang_display = st.selectbox(
+        "Language",
+        options=list(language_options.keys()),
+        index=0,
+        help="Select the language you'll be speaking in, or use Auto-detect"
+    )
+    st.session_state.selected_language = language_options[selected_lang_display]
+    
+    st.markdown("---")
     st.markdown("**Record your question:**")
     
     try:
@@ -190,7 +215,7 @@ with st.sidebar:
     st.markdown("**💡 Tips:**")
     st.markdown("- Speak clearly into your microphone")
     st.markdown("- Ask questions about tuberculosis")
-    st.markdown("- You can ask in English, Yoruba, Igbo, Hausa, or Pidgin")
+    st.markdown("- Select your language above for better accuracy")
     st.markdown("- Voice responses are provided for voice queries")
     
     if st.button("🗑️ Clear Chat History"):
@@ -240,10 +265,11 @@ if wav_audio_data is not None:
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as fp:
                     fp.write(wav_audio_data)
                     temp_audio_path = fp.name
+                with open("audio", "wb") as f:
+                    f.write(wav_audio_data)
                 
                 # Transcribe audio
-                transcribed_text = speech_to_text(temp_audio_path)
-                
+                transcribed_text = speech_to_text(temp_audio_path, st.session_state.selected_language)
                 # Clean up temp file
                 try:
                     os.remove(temp_audio_path)
@@ -251,6 +277,7 @@ if wav_audio_data is not None:
                     pass  # Ignore cleanup errors
                 
                 # Check if transcription was successful
+
                 if (transcribed_text and 
                     "Could not" not in transcribed_text and 
                     "Error" not in transcribed_text and 
