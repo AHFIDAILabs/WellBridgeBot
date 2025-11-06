@@ -3,210 +3,163 @@ import os
 import uuid
 import tempfile
 import logging
+import streamlit as st
 import speech_recognition as sr
 from gtts import gTTS
+from transformers import AutoTokenizer, VitsModel, pipeline
+import librosa
+from dotenv import load_dotenv
+import torch
+import torchaudio
+
 
 from modules.language_utils import detect_language, is_pidgin, get_language_name
 
 logger = logging.getLogger(__name__)
 
-# N-ATLAS setup for Nigerian languages
+# # N-ATLAS setup for Nigerian languages
 try:
-    from transformers import pipeline
-    import librosa
+   
+    # Load environment variables to get HuggingFace token
+    load_dotenv()
+    hf_token = os.getenv("HUGGINGFACE_API_TOKEN")
+    
+    if hf_token:
+        logger.info("HuggingFace token found, will use for N-ATLAS model downloads")
+        # Set environment variable for transformers library
+        os.environ["HF_TOKEN"] = hf_token
+    else:
+        logger.warning("HuggingFace token not found in .env file")
     
     # Initialize N-ATLAS ASR pipelines for Nigerian languages
     NATLAS_MODELS = {
-        "ha": "NCAIR1/Hausa-ASR",
-        "ig": "NCAIR1/Igbo-ASR",
-        "yo": "NCAIR1/Yoruba-ASR"
+        "ha": "Hausa-ASR",
+        "ig": "Igbo-ASR",
+        "yo": "Yoruba-ASR"
     }
-    
+
+
+    ## to get current language seesion
+     
     NATLAS_PIPELINES = {}
     for lang_code, model_name in NATLAS_MODELS.items():
         try:
-            NATLAS_PIPELINES[lang_code] = pipeline("automatic-speech-recognition", model=model_name)
-            logger.info(f"N-ATLAS {lang_code.upper()} model loaded: {model_name}")
+            logger.info(f"Loading N-ATLAS {model_name.upper().split('-')[0]} model: {'NCAIR1/'+model_name}...")
+            # Pass token explicitly to pipeline
+            NATLAS_PIPELINES[lang_code] = pipeline(
+                "automatic-speech-recognition", 
+                model='NCAIR1/'+model_name,
+                token=hf_token if hf_token else None
+            )
+            logger.info(f"✓ N-ATLAS {model_name.upper().split('-')[0]} model loaded successfully")
         except Exception as e:
-            logger.warning(f"Could not load N-ATLAS {lang_code.upper()} model: {e}")
+            logger.warning(f"✗ Could not load N-ATLAS {model_name.upper().split('-')[0]} model: {e}")
     
     USE_NATLAS = len(NATLAS_PIPELINES) > 0
-    logger.info(f"N-ATLAS available for languages: {list(NATLAS_PIPELINES.keys())}")
+    if USE_NATLAS:
+        logger.info(f"✓ N-ATLAS enabled for languages: {list(NATLAS_PIPELINES.keys())}")
+    else:
+        logger.warning("✗ N-ATLAS not available - no models loaded successfully")
 except Exception as e:
     USE_NATLAS = False
     NATLAS_PIPELINES = {}
-    logger.warning(f"N-ATLAS not available: {e}")
-
-# Whisper setup
-try:
-    import whisper
-    WHISPER_MODEL = whisper.load_model("base")  # Better accuracy than tiny
-    USE_WHISPER = True
-    logger.info("Whisper base model loaded for multilingual speech recognition.")
-except Exception as e:
-    USE_WHISPER = False
-    logger.warning(f"Whisper not available: {e}")
+    logger.warning(f"✗ N-ATLAS initialization failed: {e}")
 
 
-def speech_to_text(audio_file_path: str) -> str:
+def speech_to_text(audio_file_path: str, selected_lang: str):
     """
     Efficient multilingual speech-to-text for Nigerian languages.
     Priority: N-ATLAS -> Whisper -> Google Speech Recognition
     First detects language, then transcribes using the best available method.
     """
+    text = ""
     if not os.path.isfile(audio_file_path):
         logger.error(f"Audio file not found: {audio_file_path}")
         return "Audio file not found. Please check the path."
 
-    try:
-        # Step 1: Language Detection using Whisper
-        detected_lang = None
-        if USE_WHISPER:
-            logger.info("Detecting language from audio...")
-            try:
-                # Use Whisper to detect language first
-                result = WHISPER_MODEL.transcribe(
-                    audio_file_path,
-                    fp16=False,
-                    verbose=False,
-                    language=None  # Auto-detect language
-                )
-                
-                # Get detected language
-                detected_lang_info = result.get("language", "en")
-                
-                # Map Whisper language codes to our codes
-                lang_mapping = {
-                    "yo": "yo",
-                    "ig": "ig", 
-                    "ha": "ha",
-                    "en": "en",
-                }
-                
-                detected_lang = lang_mapping.get(detected_lang_info, "en")
-                initial_text = result.get("text", "").strip()
-                
-                # Additional check for Pidgin
-                if detected_lang == "en" and initial_text:
-                    if is_pidgin(initial_text):
-                        detected_lang = "pidgin"
-                
-                logger.info(f"Detected language: {detected_lang} ({get_language_name(detected_lang)})")
-                    
-            except Exception as e:
-                logger.warning(f"Language detection failed: {e}")
-                detected_lang = "en"  # Default to English
-        
-        # Step 2: Try N-ATLAS for Nigerian languages (Hausa, Igbo, Yoruba)
-        if detected_lang and detected_lang in NATLAS_PIPELINES:
-            try:
-                logger.info(f"Attempting N-ATLAS transcription for {get_language_name(detected_lang)}...")
-                
-                # Load audio file at 16kHz (recommended for N-ATLAS)
-                audio, sr = librosa.load(audio_file_path, sr=16000)
-                
-                # Transcribe using N-ATLAS
-                asr_pipeline = NATLAS_PIPELINES[detected_lang]
-                result = asr_pipeline(audio)
-                text = result.get("text", "").strip()
-                
-                if text and len(text) > 2:
-                    logger.info(f"N-ATLAS transcription successful: '{text[:50]}...'")
-                    return text
-                else:
-                    logger.warning("N-ATLAS returned empty or very short transcription")
-                    
-            except Exception as e:
-                logger.warning(f"N-ATLAS transcription failed: {e}")
-        
-        # Step 3: Try Whisper as fallback for targeted transcription
-        if detected_lang:
-            # Try targeted transcription with detected language
-            if USE_WHISPER and detected_lang in ["yo", "ig", "ha", "en"]:
-                try:
-                    logger.info(f"Transcribing audio with Whisper as {get_language_name(detected_lang)}...")
-                    
-                    # For Nigerian languages, try specific language hint
-                    if detected_lang != "en":
-                        result = WHISPER_MODEL.transcribe(
-                            audio_file_path,
-                            language=detected_lang,
-                            fp16=False,
-                            verbose=False,
-                        )
-                    else:
-                        # For English/Pidgin, use English setting
-                        result = WHISPER_MODEL.transcribe(
-                            audio_file_path,
-                            language="en",
-                            fp16=False,
-                            verbose=False,
-                        )
-                    
-                    text = result.get("text", "").strip()
-                    if text and len(text) > 2:
-                        logger.info(f"Whisper transcription successful: '{text[:50]}...'")
-                        return text
-                        
-                except Exception as e:
-                    logger.warning(f"Whisper transcription failed: {e}")
+    if selected_lang == "auto":
+        try:
+            import whisper
+            WHISPER_MODEL = whisper.load_model("base")  # Better accuracy than tiny
+            USE_WHISPER = True
+            logger.info("Whisper base model loaded for multilingual speech recognition.")
+        except Exception as e:
+            USE_WHISPER = False
+            logger.warning(f"Whisper not available: {e}")
+    
+        logger.info("Detecting language from audio...")
+        try:
+            # Use Whisper to detect language first
+            result = WHISPER_MODEL.transcribe(
+                audio_file_path,
+                fp16=False,
+                verbose=False,
+                language=None  # Auto-detect language
+            )
+            # Get detected language
+
+            result_lang = result.get("language")
+
+            if result_lang not in ["ha", "yo", "ig", "en", "pidgin", "hau", "ibo", "yor"]:
+                st.error(f"Detected language '{result_lang}' not supported, defaulting to English.\n Please try selecting the language manually next time.")
+            return result.get("text", "").strip(), result_lang
+        except Exception as e:
+            logger.error(f"Whisper language detection failed: {e}")
+
+    elif selected_lang in ['ha', 'ig', 'yo']:
+        try:
+            ## we will use auto detect to detect the language
+            logger.info(f"Attempting N-ATLAS transcription for {selected_lang}...")
             
-            # Step 4: Fallback to Google Speech Recognition with detected language
-            try:
-                import speech_recognition as sr
-                r = sr.Recognizer()
-                r.energy_threshold = 300
-                r.dynamic_energy_threshold = True
-                
-                with sr.AudioFile(audio_file_path) as source:
-                    r.adjust_for_ambient_noise(source, duration=0.5)
-                    audio_data = r.record(source)
-                
-                # Map to Google language codes
-                google_lang_map = {
-                    "yo": "yo",
-                    "ig": "ig",
-                    "ha": "ha",
-                    "en": "en-NG",  # Nigerian English
-                    "pidgin": "en-NG"  # Use Nigerian English for Pidgin
-                }
-                
-                google_lang = google_lang_map.get(detected_lang, "en-NG")
-                logger.info(f"Trying Google Speech Recognition with {google_lang}...")
-                
-                text = r.recognize_google(audio_data, language=google_lang)
-                if text and len(text) > 2:
-                    logger.info(f"Google transcription successful: '{text[:50]}...'")
-                    return text
-                    
-            except sr.UnknownValueError:
-                logger.warning("Google could not understand the audio")
-            except sr.RequestError as e:
-                logger.warning(f"Google Speech Recognition error: {e}")
-            except Exception as e:
-                logger.error(f"Google Speech setup failed: {e}")
-        
-        # Step 5: Final fallback - try general auto-detection with Whisper
-        if USE_WHISPER:
-            try:
-                logger.info("Attempting final Whisper transcription with auto-detection...")
-                result = WHISPER_MODEL.transcribe(
-                    audio_file_path,
-                    fp16=False,
-                    verbose=False,
+            # Load audio file at 16kHz (recommended for N-ATLAS)
+            audio_data, sample_rate = librosa.load(audio_file_path, sr=16000)
+            
+            # Transcribe using N-ATLAS
+            asr_pipeline = NATLAS_PIPELINES[selected_lang]
+            result = asr_pipeline(audio_data)
+            text = result.get("text", "").strip()
+
+            if text and len(text) > 2:
+                logger.info(f"N-ATLAS ({selected_lang}) transcription successful: '{text[:50]}...'")
+                detected_lang = selected_lang  # Update detected language
+                # return text
+
+            else:
+                logger.warning(f"N-ATLAS ({selected_lang}) returned empty or very short transcription")
+
+            return text, selected_lang 
+
+        except Exception as e:
+            logger.error(f"Transcription failed: {e}")
+
+    try:
+        # Initialize recognizer
+        r = sr.Recognizer()
+
+        r.energy_threshold = 300
+        r.dynamic_energy_threshold = True
+
+        # Load your audio
+        with sr.AudioFile(audio_file_path) as source:
+            r.adjust_for_ambient_noise(source, duration=0.5)
+            audio = r.record(source)
+        print(audio_file_path
                 )
-                text = result.get("text", "").strip()
-                if text and len(text) > 2:
-                    logger.info(f"Final Whisper transcription successful: '{text[:50]}...'")
-                    return text
-            except Exception as e:
-                logger.error(f"Final transcription attempt failed: {e}")
-        
-        return "Could not transcribe audio. Please speak clearly and ensure good audio quality."
-        
+        # Try recognizing with multiple language options
+        text_g = r.recognize_google(
+            audio,
+            language=selected_lang
+        )
+        logger.info(f"Google Speech Recognition transcription successful: '{text_g}...'")
+
+        return text_g, selected_lang
+
+    except sr.UnknownValueError:
+        logger.warning("Google could not understand the audio OR language not supported")
+    except sr.RequestError as e:
+        logger.warning(f"Google Speech Recognition error: {e}")
     except Exception as e:
-        logger.error(f"Speech-to-text error: {e}")
-        return "Error processing audio. Please try again."
+        logger.error(f"Google Speech setup failed: {e}")
 
 
 def text_to_speech(text: str, lang: str = "en") -> str:
@@ -219,34 +172,59 @@ def text_to_speech(text: str, lang: str = "en") -> str:
         if not text:
             raise ValueError("Empty text provided for TTS")
 
-        # Don't truncate - allow full response
-        logger.info(f"Creating TTS for language: {lang} ({get_language_name(lang)})")
+        if lang in ["yo", "ha"]:
+            logger.info(f"Using MMS TTS for language: {lang} ({get_language_name(lang)})")
+            try:
+                mms_lang = {
+                    "yo": "yor",  # Yoruba
+                    "ha": "hau"   # Hausa
+                }                
+                model = VitsModel.from_pretrained(f"facebook/mms-tts-{mms_lang.get(lang)}")
+                tokenizer = AutoTokenizer.from_pretrained(f"facebook/mms-tts-{mms_lang.get(lang)}")
 
-        tts_config = get_tts_config(text, lang)
+                inputs = tokenizer(text, return_tensors="pt")
 
-        try:
-            # Use slow=False for normal pace, slow=True for slower pace if needed
-            tts = gTTS(
-                text=text,
-                lang=tts_config["lang"],
-                tld=tts_config["tld"],
-                slow=False,  # Normal pace for better natural flow
-            )
-            logger.info(f"Using TTS config: {tts_config}")
+                with torch.no_grad():
+                    output = model(**inputs).waveform
 
-        except Exception as e:
-            logger.warning(f"Primary TTS config failed: {e}")
-            # Fallback to Nigerian English
-            tts = gTTS(text=text, lang="en", tld="com.ng", slow=False)
-            logger.info("Using Nigerian English fallback for TTS")
+                temp_dir = tempfile.gettempdir()
+                file_path = os.path.join(temp_dir, f"tts_{uuid.uuid4().hex}.wav")
 
-        temp_dir = tempfile.gettempdir()
-        file_path = os.path.join(temp_dir, f"tts_{uuid.uuid4().hex}.mp3")
+                torchaudio.save(file_path, output, sample_rate=16000)
 
-        tts.save(file_path)
-        logger.info(f"TTS audio saved: {file_path}")
+                print(f"mms for {lang} was successful")
 
-        return file_path
+                return file_path
+            except Exception as e:
+                logger.warning(f"MMS TTS failed: {e}")
+        else:
+            try:
+                        # Use slow=False for normal pace, slow=True for slower pace if needed
+                # Don't truncate - allow full response
+                logger.info(f"Creating TTS for language: {lang} ({get_language_name(lang)})")
+
+                tts_config = get_tts_config(text, lang)
+                tts = gTTS(
+                    text=text,
+                    lang=tts_config["lang"],
+                    tld=tts_config["tld"],
+                    slow=False,  # Normal pace for better natural flow
+                )
+                logger.info(f"Using TTS config: {tts_config}")
+
+            except Exception as e:
+                logger.warning(f"Primary TTS config failed: {e}")
+                # Fallback to Nigerian English
+                tts = gTTS(text=text, lang="en", tld="com.ng", slow=False)
+                logger.info("Using Nigerian English fallback for TTS")
+
+            temp_dir = tempfile.gettempdir()
+            file_path = os.path.join(temp_dir, f"tts_{uuid.uuid4().hex}.mp3")
+
+            tts.save(file_path)
+            logger.info(f"TTS audio saved: {file_path}")
+
+            return file_path
 
     except Exception as e:
         logger.error(f"TTS conversion failed: {e}")
