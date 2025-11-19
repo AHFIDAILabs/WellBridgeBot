@@ -359,24 +359,29 @@ def get_response(query: str, vector_store, lang) -> Dict[str, Any]:
     3. NEVER skip vector store
     """
     try:
-
+        # Auto-detect language if lang="auto"
+        if lang == "auto":
+            detected_lang = detect_language(query)
+            logger.info(f"Auto-detected language: {detected_lang} from query: '{query[:50]}...'")
+        else:
+            detected_lang = lang
         
         # Check for Pidgin specifically (but don't override English detection)
-        if lang == "en" and is_pidgin(query):
+        if detected_lang == "en" and is_pidgin(query):
             detected_lang = "pidgin"
         
         # Ensure we have a valid language code
         valid_langs = ["en", "yo", "ig", "ha", "pidgin"]
-        if lang not in valid_langs:
+        if detected_lang not in valid_langs:
             detected_lang = "en"  # Default to English if unknown
         
         # The target language for response should match the query language
-        target_lang = lang
+        target_lang = detected_lang
         
         logger.info(f"=" * 70)
         logger.info(f"NEW QUERY PROCESSING")
         logger.info(f"Query: '{query[:100]}...'")
-        logger.info(f"Detected language: {lang} ({get_language_name(lang)})")
+        logger.info(f"Detected language: {detected_lang} ({get_language_name(detected_lang)})")
         logger.info(f"Target response language: {target_lang}")
         logger.info(f"=" * 70)
 
