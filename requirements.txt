@@ -1,52 +1,93 @@
-# Core PyTorch (CPU version)
---extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.2.2
-torchaudio==2.2.2
+# ============================================================================
+# WellBridge TB Chatbot - Production Dependencies
+# ============================================================================
 
-# Environment & Utilities
+# Core Web Framework
+Flask==3.0.0
+Werkzeug==3.0.1
+
+# Environment & Configuration
 python-dotenv==1.0.1
-requests==2.31.0
-numpy==1.26.4
-tqdm==4.66.4
 
-# LangChain Core (WITHOUT langchain-huggingface to avoid conflicts)
+# HTTP & API Requests
+requests==2.31.0
+aiohttp==3.9.1
+
+# Redis (User Preferences)
+redis==5.0.1
+
+# ============================================================================
+# AI/ML - LangChain & LLM
+# ============================================================================
+
+# LangChain Core
 langchain-core==0.1.52
 langchain==0.1.20
 langchain-community==0.0.38
 langchain-openai==0.1.7
 langchain-pinecone==0.1.0
-
-# Hugging Face & Transformers (STABLE VERSIONS)
-transformers>=4.35.0
-tokenizers>=0.19.1
-huggingface_hub>=0.20.0
-sentence-transformers>=2.2.0
-scikit-learn==1.4.2
+langchain-text-splitters>=0.0.1
 
 # Vector Database
 pinecone-client>=3.0.0
 
-# Document Processing
-pypdf==4.2.0
-beautifulsoup4==4.12.3
-unstructured==0.13.7
-langdetect==1.0.9
-markdown==3.6
+# Embeddings & NLP
+sentence-transformers>=2.2.0
+huggingface_hub>=0.20.0
 
-# Audio Processing
+# Language Detection & Translation
+langdetect==1.0.9
+
+# ============================================================================
+# Audio Processing (ASR & TTS)
+# ============================================================================
+
+# Core PyTorch (CPU version) - Required for MMS TTS
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+torchaudio
+
+# Speech Recognition (ASR)
 SpeechRecognition==3.10.0
+openai-whisper
+
+# Text-to-Speech (TTS)
 gTTS==2.4.0
 pydub==0.25.1
 
-# Streamlit UI
-streamlit>=1.30.0
-streamlit-audiorec>=0.1.0
-
-# Speech-to-Text
-openai-whisper
-
-# Meta MMS dependencies
+# Meta MMS TTS Dependencies
+transformers>=4.35.0
+tokenizers>=0.19.1
 accelerate>=0.20.0
 datasets>=2.14.0
 soundfile>=0.12.1
 librosa>=0.10.0
+
+# ============================================================================
+# Document Processing (Knowledge Base)
+# ============================================================================
+
+pypdf==4.2.0
+beautifulsoup4==4.12.3
+unstructured==0.13.7
+markdown==3.6
+
+# ============================================================================
+# Utilities
+# ============================================================================
+
+numpy==1.26.4
+scikit-learn==1.4.2
+
+# ============================================================================
+# Streamlit UI (for testing interface - app-st.py)
+# ============================================================================
+
+streamlit>=1.30.0
+streamlit-audiorec>=0.1.0
+
+# ============================================================================
+# Testing Dependencies (Install separately with: pip install -r requirements-dev.txt)
+# ============================================================================
+
+# pytest>=7.4.0

@@ -135,7 +135,6 @@ def create_multilingual_search_variations(query: str, detected_lang: str) -> Lis
 
     return list(dict.fromkeys(variations))  # deduplicate, keep order
 
-
 def get_qa_chain(vector_store):
     """Create RetrievalQA chain for multilingual queries."""
     llm = get_llm()
@@ -351,7 +350,7 @@ Answer:"""
 
 # ------------------- Main Response -------------------
 
-def get_response(query: str, vector_store) -> Dict[str, Any]:
+def get_response(query: str, vector_store, lang) -> Dict[str, Any]:
     """Main function to get multilingual responses.
     
     STRICT CONTROL FLOW:
@@ -360,8 +359,12 @@ def get_response(query: str, vector_store) -> Dict[str, Any]:
     3. NEVER skip vector store
     """
     try:
-        # Detect the language of the query
-        detected_lang = detect_language(query)
+        # Auto-detect language if lang="auto"
+        if lang == "auto":
+            detected_lang = detect_language(query)
+            logger.info(f"Auto-detected language: {detected_lang} from query: '{query[:50]}...'")
+        else:
+            detected_lang = lang
         
         # Check for Pidgin specifically (but don't override English detection)
         if detected_lang == "en" and is_pidgin(query):
@@ -384,7 +387,7 @@ def get_response(query: str, vector_store) -> Dict[str, Any]:
 
         # STEP 1: ALWAYS search knowledge base FIRST
         logger.info("STEP 1: Searching vector store (knowledge base)...")
-        search_variations = create_multilingual_search_variations(query, detected_lang)
+        search_variations = create_multilingual_search_variations(query, lang)
         logger.info(f"Search variations: {search_variations}")
         
         kb_result = search_kb_with_multiple_strategies(search_variations, vector_store)
@@ -424,7 +427,7 @@ def get_response(query: str, vector_store) -> Dict[str, Any]:
                 "source": source_info,
                 "answer": answer,
                 "lang": target_lang,
-                "detected_lang": detected_lang
+                "detected_lang": lang
             }
         
         # USE WEB SEARCH FALLBACK
@@ -441,7 +444,7 @@ def get_response(query: str, vector_store) -> Dict[str, Any]:
             "source": "internet_search",
             "answer": fallback_answer,
             "lang": target_lang,
-            "detected_lang": detected_lang
+            "detected_lang": lang
         }
 
     except Exception as e:
