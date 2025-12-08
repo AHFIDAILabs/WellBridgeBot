@@ -45,8 +45,8 @@ class NATLASTranscriber:
             natlas_langs = config.get_natlas_languages()
             
             model_map = {
-                # "ha": "Hausa-ASR",
-                # "ig": "Igbo-ASR",
+                "ha": "Hausa-ASR",
+                "ig": "Igbo-ASR",
                 "yo": "Yoruba-ASR"
             }
             
