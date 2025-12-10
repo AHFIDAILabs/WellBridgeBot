@@ -331,3 +331,8 @@ def webhook():
         
         # CRITICAL: Always return 200 immediately to prevent WhatsApp retries
         return 'Event received', 200
+
+
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
