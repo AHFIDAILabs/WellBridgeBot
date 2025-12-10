@@ -1,5 +1,6 @@
 from fileinput import filename
 import json
+import os
 import requests
 import hashlib
 import logging
@@ -81,14 +82,14 @@ def parse_json(data):
         return None
 
 def get_media_url(media_id):
-    url = f"https://graph.facebook.com/{config['VERSION']}/{media_id}"
+    url = f"https://graph.facebook.com/{os.getenv('VERSION')}/{media_id}"
 
     data = {
 
     }
     
     headers = {
-        "Authorization": f"Bearer {config['ACCESS_TOKEN']}",
+        "Authorization": f"Bearer {os.getenv('ACCESS_TOKEN')}",
 
         "Content-Type": "application/json"
         }
@@ -98,14 +99,14 @@ def get_media_url(media_id):
 
 def download_media(json_object):
 
-    url = f"https://graph.facebook.com/{config['VERSION']}/{json_object['url']}"
+    url = f"https://graph.facebook.com/{os.getenv('VERSION')}/{json_object['url']}"
 
     data = {
 
     }
 
     headers = {
-        "Authorization": f"Bearer {config['ACCESS_TOKEN']}",
+        "Authorization": f"Bearer {os.getenv('ACCESS_TOKEN')}",
         "Content-Type": "application/json"
     }
 
@@ -124,7 +125,7 @@ def download_media(json_object):
 
 def upload_media(file_path):
     url = "https://graph.facebook.com/v13.0/me/messages"
-    headers = {"Authorization": f"Bearer {config['ACCESS_TOKEN']}"}
+    headers = {"Authorization": f"Bearer {os.getenv('ACCESS_TOKEN')}"}
     with open(file_path, "rb") as f:
         r = requests.post(url, headers=headers, files={"file": f})
     return r.json()
@@ -154,10 +155,10 @@ def upload_media_to_whatsapp(file_path: str) -> dict:
         else:
             mime_type = 'audio/ogg; codecs=opus'  # Default to OGG
         
-        url = f"https://graph.facebook.com/{config['VERSION']}/{config['PHONE_NUMBER_ID']}/media"
+        url = f"https://graph.facebook.com/{os.getenv('VERSION')}/{os.getenv('PHONE_NUMBER_ID')}/media"
         
         headers = {
-            "Authorization": f"Bearer {config['ACCESS_TOKEN']}"
+            "Authorization": f"Bearer {os.getenv('ACCESS_TOKEN')}"
         }
         
         # Read file and upload with correct MIME type
@@ -192,11 +193,11 @@ async def send_message(data):
     """
     headers = {
         "Content-type": "application/json",
-        "Authorization": f"Bearer {current_app.config['ACCESS_TOKEN']}",
+        "Authorization": f"Bearer {os.getenv('ACCESS_TOKEN')}",
     }
 
     async with aiohttp.ClientSession() as session:
-        url = 'https://graph.facebook.com' + f"/{current_app.config['VERSION']}/{current_app.config['PHONE_NUMBER_ID']}/messages"
+        url = 'https://graph.facebook.com' + f"/{ os.getenv('VERSION')}/{os.getenv('PHONE_NUMBER_ID')}/messages"
         try:
             async with session.post(url, data=data, headers=headers) as response:
                 if response.status == 200:
@@ -220,7 +221,7 @@ def send_audio_message(audio_object_id, recipient_phone_number):
         audio_object_id: The media ID from WhatsApp after upload
         recipient_phone_number: The recipient's phone number
     """
-    url = f"https://graph.facebook.com/{config['VERSION']}/{config['PHONE_NUMBER_ID']}/messages"
+    url = f"https://graph.facebook.com/{os.getenv('VERSION')}/{os.getenv('PHONE_NUMBER_ID')}/messages"
 
     data = {
         "audio": {
@@ -233,7 +234,7 @@ def send_audio_message(audio_object_id, recipient_phone_number):
     }
 
     headers = {
-        "Authorization": f"Bearer {config['ACCESS_TOKEN']}",
+        "Authorization": f"Bearer {os.getenv('ACCESS_TOKEN')}",
         "Content-Type": "application/json"
     }
 
@@ -253,7 +254,7 @@ def send_text_message(text, recipient_phone_number):
     Returns:
         Response from WhatsApp API
     """
-    url = f"https://graph.facebook.com/{config['VERSION']}/{config['PHONE_NUMBER_ID']}/messages"
+    url = f"https://graph.facebook.com/{os.getenv('VERSION')}/{os.getenv('PHONE_NUMBER_ID')}/messages"
 
     data = {
         "messaging_product": "whatsapp",
@@ -266,7 +267,7 @@ def send_text_message(text, recipient_phone_number):
     }
 
     headers = {
-        "Authorization": f"Bearer {config['ACCESS_TOKEN']}",
+        "Authorization": f"Bearer {os.getenv('ACCESS_TOKEN')}",
         "Content-Type": "application/json"
     }
 
@@ -312,7 +313,7 @@ def send_interactive_buttons(recipient_phone_number, body_text, buttons):
     Returns:
         Response from WhatsApp API
     """
-    url = f"https://graph.facebook.com/{config['VERSION']}/{config['PHONE_NUMBER_ID']}/messages"
+    url = f"https://graph.facebook.com/{os.getenv('VERSION')}/{os.getenv('PHONE_NUMBER_ID')}/messages"
 
     # Format buttons for WhatsApp API
     action_buttons = [
@@ -343,7 +344,7 @@ def send_interactive_buttons(recipient_phone_number, body_text, buttons):
     }
 
     headers = {
-        "Authorization": f"Bearer {config['ACCESS_TOKEN']}",
+        "Authorization": f"Bearer {os.getenv('ACCESS_TOKEN')}",
         "Content-Type": "application/json"
     }
 

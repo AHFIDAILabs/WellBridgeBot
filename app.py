@@ -1,3 +1,4 @@
+import os
 import json
 import flask
 import asyncio
@@ -11,6 +12,8 @@ from modules.audio_transcriber import get_transcriber
 from modules.audio_synthesizer import get_synthesizer
 from modules.vector_store_manager import get_vector_store
 from modules.user_preferences import get_preference_manager
+from dotenv import load_dotenv
+
 
 # Configure logging
 logging.basicConfig(
@@ -21,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# ======== PRE-LOAD MODELS AT STARTUP ========
+# ======== PRE-LOAD MODELS AT STARTUP ========  
 # This ensures WhatsApp webhook can respond quickly with 200
 # Models are loaded once and cached by singleton pattern
 
@@ -50,7 +53,7 @@ except Exception as e:
     transcriber = None
     synthesizer = None
     vector_store = None
-    preference_manager = None
+#     preference_manager = None
 
 
 @app.route('/')
@@ -60,10 +63,17 @@ def index():
 with open('config.json') as f:
     config = json.load(f)
 
-print(config) 
 app.config.update(config)
 
- 
+load_dotenv()
+WA_ID = os.getenv("APP_ID","")
+WA_SECRET = os.getenv("APP_SECRET","")
+WA_ID_RECIPIENT = os.getenv("RECIPIENT_WAID","")
+WA_VERSION = os.getenv("VERSION","")
+PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID","")
+ACCESS_TOKEN = os.getenv("ACCESS_TOKEN","")
+VERIFY_TOKEN = os.getenv("VERIFY_TOKEN","")
+
 
 # ======== BACKGROUND MESSAGE PROCESSING ========
 def process_audio_message(data: dict):
@@ -271,7 +281,6 @@ def process_interactive_button(data: dict):
     except Exception as e:
         logger.error(f"❌ Error processing interactive button: {e}", exc_info=True)
 
-
 # ======== WEBHOOK PROCESS ========
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
@@ -280,46 +289,50 @@ def webhook():
     Returns 200 immediately to prevent retries, processes messages in background.
     """
     if request.method == 'GET':
+        logger.info("Webhook received GET request for verification")
         # Verification (used by Meta)
-        verify_token = app.config['VERIFY_TOKEN']
+        verify_token = os.getenv('VERIFY_TOKEN')
+
+        print(verify_token)
         if request.args.get('hub.verify_token') == verify_token:
+        
             return request.args.get('hub.challenge')
         return 'Verification failed', 403
 
     if request.method == 'POST':
-        logger.info("📨 Webhook received POST request")
+        logger.info("Webhook received POST request")
         
         try:
             data = parse_json(request.get_json())
             
             if not data:
-                logger.warning("⚠️  Received empty or invalid data")
+                logger.warning("Received empty or invalid data")
                 return 'Event received', 200
             
             # Process message in background thread to return 200 immediately
             if data.get('type') == 'audio':
-                logger.info("🎤 Audio message detected, processing in background...")
+                logger.info("Audio message detected, processing in background...")
                 thread = Thread(target=process_audio_message, args=(data,))
                 thread.daemon = True
                 thread.start()
                 
             elif data.get('type') == 'text':
-                logger.info("💬 Text message detected, processing in background...")
+                logger.info("Text message detected, processing in background...")
                 thread = Thread(target=process_text_message, args=(data,))
                 thread.daemon = True
                 thread.start()
                 
             elif data.get('type') == 'interactive':
-                logger.info("🔘 Interactive button clicked, processing in background...")
+                logger.info("Interactive button clicked, processing in background...")
                 thread = Thread(target=process_interactive_button, args=(data,))
                 thread.daemon = True
                 thread.start()
                 
             else:
-                logger.info(f"ℹ️  Unsupported message type: {data.get('type')}")
+                logger.info(f"Unsupported message type: {data.get('type')}")
             
         except Exception as e:
-            logger.error(f"❌ Error in webhook: {e}", exc_info=True)
+            logger.error(f"Error in webhook: {e}", exc_info=True)
         
         # CRITICAL: Always return 200 immediately to prevent WhatsApp retries
         return 'Event received', 200
