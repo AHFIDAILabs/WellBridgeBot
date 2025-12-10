@@ -9,8 +9,6 @@ from flask import current_app
 
 logger = logging.getLogger(__name__)
 
-with open('config.json') as f:
-    config = json.load(f)
 
 def parse_json(data):
     """

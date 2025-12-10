@@ -60,11 +60,6 @@ except Exception as e:
 def index():
     return "<h1>Welcome to the Flask App</h1>"
 
-with open('config.json') as f:
-    config = json.load(f)
-
-app.config.update(config)
-
 load_dotenv()
 WA_ID = os.getenv("APP_ID","")
 WA_SECRET = os.getenv("APP_SECRET","")
