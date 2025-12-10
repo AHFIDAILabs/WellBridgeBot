@@ -52,7 +52,7 @@ jsonpatch
 jsonpointer
 jsonschema
 jsonschema-specifications
-langchain
+langchain==0.1.20
 langchain-community
 langchain-core
 langchain-openai
