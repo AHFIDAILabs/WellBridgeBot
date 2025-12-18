@@ -37,5 +37,8 @@ EXPOSE 10000
 # ENV STREAMLIT_SERVER_PORT 8501
 # ENV STREAMLIT_SERVER_HEADLESS true
 
+# Ensure Python can find modules
+ENV PYTHONPATH=/app
+
 # Run app.py when the container launches
-CMD gunicorn app:app --bind 0.0.0.0:$PORT
+CMD ["gunicorn", "app:app", "--bind", "0.0.0.0:$PORT", "--chdir", "/app"]
