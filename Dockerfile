@@ -16,8 +16,13 @@ COPY requirements-dev.txt .
 #RUN apt-get update && apt-get install -y ffmpeg
 #RUN pip install --no-cache-dir -r requirements.txt
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y ffmpeg git portaudio19-dev && rm -rf /var/lib/apt/lists/*
+# Install system dependencies including Redis
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    git \
+    portaudio19-dev \
+    redis-server \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements-dev.txt
