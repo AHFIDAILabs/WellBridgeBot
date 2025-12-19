@@ -53,7 +53,7 @@ except Exception as e:
     transcriber = None
     synthesizer = None
     vector_store = None
-#     preference_manager = None
+    preference_manager = None
 
 
 @app.route('/')
