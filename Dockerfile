@@ -41,4 +41,4 @@ EXPOSE 10000
 ENV PYTHONPATH=/app
 
 # Run app.py when the container launches
-CMD ["gunicorn", "app:app", "--bind", "0.0.0.0:$PORT", "--chdir", "/app"]
+CMD ["gunicorn", "app:app", "--bind", "0.0.0.0:8080", "--chdir", "/app"]
