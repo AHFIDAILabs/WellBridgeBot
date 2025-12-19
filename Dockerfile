@@ -30,6 +30,32 @@ RUN pip install --no-cache-dir -r requirements-dev.txt
 # Copy the rest of the application's code into the container at /app
 COPY . .
 
+# Pre-download Hugging Face models to cache them in the image
+# This prevents runtime download failures and speeds up container startup
+ARG HUGGINGFACE_API_TOKEN
+ENV HUGGINGFACE_API_TOKEN=$HUGGINGFACE_API_TOKEN
+RUN if [ -n "$HUGGINGFACE_API_TOKEN" ]; then \
+    python3 -c "from transformers import pipeline; \
+    import os; \
+    token = os.getenv('HUGGINGFACE_API_TOKEN'); \
+    print('Downloading N-ATLAS models...'); \
+    try: \
+        pipeline('automatic-speech-recognition', model='NCAIR1/Yoruba-ASR', token=token); \
+        print('✓ Yoruba-ASR cached'); \
+    except Exception as e: \
+        print(f'⚠ Yoruba-ASR failed: {e}'); \
+    try: \
+        pipeline('automatic-speech-recognition', model='NCAIR1/Hausa-ASR', token=token); \
+        print('✓ Hausa-ASR cached'); \
+    except Exception as e: \
+        print(f'⚠ Hausa-ASR failed: {e}'); \
+    try: \
+        pipeline('automatic-speech-recognition', model='NCAIR1/Igbo-ASR', token=token); \
+        print('✓ Igbo-ASR cached'); \
+    except Exception as e: \
+        print(f'⚠ Igbo-ASR failed: {e}');" || echo "Skipping model cache - token not provided"; \
+    fi
+
 # Make port 10000 available to the world outside this container
 EXPOSE 10000
 
