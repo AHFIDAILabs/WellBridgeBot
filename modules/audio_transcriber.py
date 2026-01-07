@@ -46,10 +46,10 @@ class NATLASTranscriber:
             
             model_map = {
                 "ha": "Hausa-ASR",
-                "ig": "Igbo-ASR",
-                "yo": "Yoruba-ASR"
+                "yo": "Yoruba-ASR",
+                "ig": "Igbo-ASR"
             }
-            
+
             for lang_code in natlas_langs:
                 if lang_code not in model_map:
                     continue
