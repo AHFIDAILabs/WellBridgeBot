@@ -3,7 +3,7 @@ import logging
 from typing import Dict, Any, List
 
 from langchain_openai import ChatOpenAI
-from langchain.chains import RetrievalQA
+from langchain_classic.chains import RetrievalQA
 from langchain_core.prompts import PromptTemplate
 from langchain_core.messages import HumanMessage
 from langchain_community.utilities import DuckDuckGoSearchAPIWrapper
