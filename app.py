@@ -7,7 +7,7 @@ import requests
 from threading import Thread
 from flask import Flask, render_template, request
 from modules.llm_handler import get_response
-from modules.utills import parse_json, get_media_url, download_media, upload_media_to_whatsapp, get_text_message_input, send_message, send_audio_message, send_text_message, send_language_selection_menu, send_language_switch_confirmation, is_language_switch_request
+from modules.utills import parse_json, get_media_url, download_media, upload_media_to_whatsapp, get_text_message_input, send_message, send_audio_message, send_text_message, send_language_selection_menu, send_language_switch_confirmation, is_language_switch_request, send_followup_questions, send_language_options_after_answer, send_typing_indicator, send_recording_indicator
 from modules.audio_transcriber import get_transcriber
 from modules.audio_synthesizer import get_synthesizer
 from modules.vector_store_manager import get_vector_store
@@ -80,15 +80,19 @@ def process_audio_message(data: dict):
     try:
         logger.info("🎤 Processing audio message in background...")
         
-        # Get sender's WhatsApp ID (phone number)
+        # Get sender's WhatsApp ID (phone number) and message ID
         sender_phone = data.get('wa_id', 'unknown')
-        logger.info(f"Message from: {sender_phone}")
+        message_id = data.get('id', None)
+        logger.info(f"Message from: {sender_phone} (ID: {message_id})")
         
-        # Check if first-time user
+        # Check if first-time user and set English as default
         if preference_manager.is_first_time_user(sender_phone):
             logger.info(f"🆕 First-time user detected: {sender_phone}")
+            # Set English as default
+            preference_manager.set_user_preference(sender_phone, "en")
+            # Send welcome menu once at the beginning
             send_language_selection_menu(sender_phone)
-            logger.info("✓ Language selection menu sent to first-time user")
+            logger.info("✓ Language selection menu sent (English set as default)")
             return
         
         # Get user's preferred language
@@ -109,42 +113,60 @@ def process_audio_message(data: dict):
         transcribed_text, detected_lang = transcriber.transcribe(file_path, user_lang)
         logger.info(f"✓ Transcription: '{transcribed_text[:100]}...' (lang={detected_lang})")
         
+        # Show typing indicator while LLM generates response
+        if message_id:
+            send_typing_indicator(sender_phone, message_id)
+        
         # Get LLM response using user's language
         result = get_response(transcribed_text, vector_store, user_lang)
         answer = result.get("answer", "Sorry, I encountered an error processing your request.")
         logger.info(f"✓ LLM response generated: '{answer[:100]}...'")
         
-        # Generate audio response first using pre-loaded synthesizer with user's language
-        audio_file_path = synthesizer.synthesize(answer, user_lang)
-        logger.info(f"✓ Audio response generated: {audio_file_path}")
+        # Send text response FIRST (instant delivery while audio generates)
+        send_text_message(answer, sender_phone)
+        logger.info(f"✓ Text message sent to {sender_phone}")
         
-        # Upload and send audio first (matches user's input format)
-        upload_response = upload_media_to_whatsapp(audio_file_path)
-        
-        if 'id' in upload_response:
-            media_object_id = upload_response['id']
-            logger.info(f"✓ Media uploaded with ID: {media_object_id}")
-            
-            # Send audio message back to user using wa_id
-            send_audio_message(media_object_id, sender_phone)
-            logger.info(f"✓ Audio message sent to {sender_phone}")
-            
-            # Then send text version (for reference/accessibility)
-            send_text_message(answer, sender_phone)
-            logger.info(f"✓ Text message sent to {sender_phone}")
-            
-            logger.info("✅ Audio message processed - sent audio first, then text!")
-        else:
-            logger.error(f"❌ Failed to upload media: {upload_response.get('error')}")
-            # If audio upload fails, at least send text
-            send_text_message(answer, sender_phone)
-            logger.info("✅ Audio message processed - text sent (audio upload failed)")
-        
-        # Cleanup temporary audio file
+        # Send follow-up question buttons
         try:
-            synthesizer.cleanup_audio_file(audio_file_path)
-        except Exception as e:
-            logger.warning(f"Failed to cleanup audio file: {e}")
+            send_followup_questions(sender_phone, user_lang)
+            logger.info(f"✓ Follow-up questions sent to {sender_phone}")
+        except Exception as followup_error:
+            logger.warning(f"Failed to send follow-up questions: {followup_error}")
+        
+        # Then generate and send audio response
+        try:
+            # Show recording indicator while audio is being synthesized
+            if message_id:
+                send_recording_indicator(sender_phone, message_id)
+            
+            audio_file_path = synthesizer.synthesize(answer, user_lang)
+            logger.info(f"✓ Audio response generated: {audio_file_path}")
+            
+            # Upload and send audio
+            upload_response = upload_media_to_whatsapp(audio_file_path)
+            
+            if 'id' in upload_response:
+                media_object_id = upload_response['id']
+                logger.info(f"✓ Media uploaded with ID: {media_object_id}")
+                
+                # Send audio message back to user
+                send_audio_message(media_object_id, sender_phone)
+                logger.info(f"✓ Audio message sent to {sender_phone}")
+                
+                logger.info("✅ Audio message processed - sent text first, then audio!")
+            else:
+                logger.error(f"❌ Failed to upload media: {upload_response.get('error')}")
+                logger.info("✅ Audio message processed - text sent (audio upload failed)")
+            
+            # Cleanup temporary audio file
+            try:
+                synthesizer.cleanup_audio_file(audio_file_path)
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to cleanup audio file: {cleanup_error}")
+                
+        except Exception as audio_error:
+            logger.warning(f"⚠️ Audio generation failed, text was already sent: {audio_error}")
+            logger.info("✅ Audio message processed - text sent (audio generation failed)")
         
     except Exception as e:
         logger.error(f"❌ Error processing audio message: {e}", exc_info=True)
@@ -159,23 +181,29 @@ def process_text_message(data: dict):
     try:
         logger.info("💬 Processing text message in background...")
         
-        # Get sender's WhatsApp ID (phone number)
+        # Get sender's WhatsApp ID (phone number) and message ID
         sender_phone = data.get('wa_id', 'unknown')
+        message_id = data.get('id', None)
         text = data['text']
-        logger.info(f"Message from {sender_phone}: '{text}'")
+        logger.info(f"Message from {sender_phone}: '{text}' (ID: {message_id})")
         
         # Check if user wants to change language
         if is_language_switch_request(text):
             logger.info(f"🔄 Language switch request detected from {sender_phone}")
-            send_language_selection_menu(sender_phone)
+            # Get current language to exclude from menu
+            current_lang = preference_manager.get_user_preference(sender_phone) or "en"
+            send_language_selection_menu(sender_phone, current_lang)
             logger.info("✓ Language selection menu sent")
             return
         
-        # Check if first-time user
+        # Check if first-time user and set English as default
         if preference_manager.is_first_time_user(sender_phone):
             logger.info(f"🆕 First-time user detected: {sender_phone}")
+            # Set English as default
+            preference_manager.set_user_preference(sender_phone, "en")
+            # Send welcome menu once at the beginning
             send_language_selection_menu(sender_phone)
-            logger.info("✓ Language selection menu sent to first-time user")
+            logger.info("✓ Language selection menu sent (English set as default)")
             return
         
         # Get user's preferred language
@@ -186,6 +214,10 @@ def process_text_message(data: dict):
         
         logger.info(f"Using user's preferred language: {user_lang}")
         
+        # Show typing indicator while LLM generates response
+        if message_id:
+            send_typing_indicator(sender_phone, message_id)
+        
         # Get LLM response using user's language
         result = get_response(text, vector_store, user_lang)
         answer = result.get("answer", "Sorry, I encountered an error processing your request.")
@@ -195,8 +227,19 @@ def process_text_message(data: dict):
         send_text_message(answer, sender_phone)
         logger.info(f"✓ Text message sent to {sender_phone}")
         
+        # Send follow-up question buttons
+        try:
+            send_followup_questions(sender_phone, user_lang)
+            logger.info(f"✓ Follow-up questions sent to {sender_phone}")
+        except Exception as followup_error:
+            logger.warning(f"Failed to send follow-up questions: {followup_error}")
+        
         # Generate audio response using user's language
         try:
+            # Show recording indicator while audio is being synthesized
+            if message_id:
+                send_recording_indicator(sender_phone, message_id)
+            
             audio_file_path = synthesizer.synthesize(answer, user_lang)
             logger.info(f"✓ Audio response generated: {audio_file_path}")
             

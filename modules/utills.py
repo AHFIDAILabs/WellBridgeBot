@@ -5,9 +5,49 @@ import requests
 import hashlib
 import logging
 import aiohttp
+import re
 from flask import current_app
 
 logger = logging.getLogger(__name__)
+
+
+def format_text_for_whatsapp(text: str) -> str:
+    """
+    Convert markdown/rich text formatting to WhatsApp-compatible formatting.
+    
+    WhatsApp supports:
+    - *bold* for bold
+    - _italic_ for italic
+    - ~strikethrough~ for strikethrough
+    - ```code``` for monospace
+    
+    Args:
+        text: Text with markdown formatting
+        
+    Returns:
+        Text formatted for WhatsApp
+    """
+    if not text:
+        return text
+    
+    # Convert markdown bold (**text** or __text__) to WhatsApp bold (*text*)
+    text = re.sub(r'\*\*(.+?)\*\*', r'*\1*', text)
+    text = re.sub(r'__(.+?)__', r'*\1*', text)
+    
+    # Remove markdown headers (###, ##, #) - WhatsApp doesn't support them
+    text = re.sub(r'^#{1,6}\s+(.+)$', r'*\1*', text, flags=re.MULTILINE)
+    
+    # Convert markdown lists to simple bullet points
+    text = re.sub(r'^\s*[-*+]\s+', '• ', text, flags=re.MULTILINE)
+    text = re.sub(r'^\s*\d+\.\s+', '• ', text, flags=re.MULTILINE)
+    
+    # Remove markdown links [text](url) - show as "text (url)"
+    text = re.sub(r'\[([^\]]+)\]\(([^\)]+)\)', r'\1 (\2)', text)
+    
+    # Clean up excessive newlines (more than 2)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    
+    return text.strip()
 
 
 def parse_json(data):
@@ -241,13 +281,14 @@ def send_audio_message(audio_object_id, recipient_phone_number):
     print(response.json())
 
 
-def send_text_message(text, recipient_phone_number):
+def send_typing_indicator(recipient_phone_number, message_id):
     """
-    Send a text message to a WhatsApp recipient.
+    Send typing indicator to WhatsApp recipient and mark message as read.
+    Shows "typing..." animation for up to 25 seconds or until you send a response.
     
     Args:
-        text: The text message to send
         recipient_phone_number: The recipient's phone number
+        message_id: The WhatsApp message ID from the incoming message
         
     Returns:
         Response from WhatsApp API
@@ -256,11 +297,88 @@ def send_text_message(text, recipient_phone_number):
 
     data = {
         "messaging_product": "whatsapp",
+        "status": "read",
+        "message_id": message_id,
+        "typing_indicator": {
+            "type": "text"
+        }
+    }
+
+    headers = {
+        "Authorization": f"Bearer {os.getenv('ACCESS_TOKEN')}",
+        "Content-Type": "application/json"
+    }
+
+    try:
+        response = requests.post(url, json=data, headers=headers)
+        logger.info(f"⌨️  Typing indicator sent to {recipient_phone_number}")
+        return response.json()
+    except Exception as e:
+        logger.warning(f"Failed to send typing indicator: {e}")
+        return None
+
+
+def send_recording_indicator(recipient_phone_number, message_id):
+    """
+    Send recording indicator to WhatsApp recipient and mark message as read.
+    Shows microphone/recording animation for up to 25 seconds or until you send a response.
+    
+    Args:
+        recipient_phone_number: The recipient's phone number
+        message_id: The WhatsApp message ID from the incoming message
+        
+    Returns:
+        Response from WhatsApp API
+    """
+    url = f"https://graph.facebook.com/{os.getenv('VERSION')}/{os.getenv('PHONE_NUMBER_ID')}/messages"
+
+    data = {
+        "messaging_product": "whatsapp",
+        "status": "read",
+        "message_id": message_id,
+        "typing_indicator": {
+            "type": "audio"
+        }
+    }
+
+    headers = {
+        "Authorization": f"Bearer {os.getenv('ACCESS_TOKEN')}",
+        "Content-Type": "application/json"
+    }
+
+    try:
+        response = requests.post(url, json=data, headers=headers)
+        logger.info(f"🎤 Recording indicator sent to {recipient_phone_number}")
+        return response.json()
+    except Exception as e:
+        logger.warning(f"Failed to send recording indicator: {e}")
+        return None
+
+
+def send_text_message(text, recipient_phone_number):
+    """
+    Send a text message to a WhatsApp recipient.
+    Automatically formats text for WhatsApp compatibility.
+    
+    Args:
+        text: The text message to send (can include markdown)
+        recipient_phone_number: The recipient's phone number
+        
+    Returns:
+        Response from WhatsApp API
+    """
+    # Format text for WhatsApp
+    formatted_text = format_text_for_whatsapp(text)
+    
+    url = f"https://graph.facebook.com/{os.getenv('VERSION')}/{os.getenv('PHONE_NUMBER_ID')}/messages"
+
+    data = {
+        "messaging_product": "whatsapp",
         "recipient_type": "individual",
         "to": recipient_phone_number,
         "type": "text",
         "text": {
-            "body": text
+            "body": formatted_text
         }
     }
 
@@ -352,9 +470,66 @@ def send_interactive_buttons(recipient_phone_number, body_text, buttons):
     return response.json()
 
 
-def send_language_selection_menu(recipient_phone_number):
+def send_language_selection_menu(recipient_phone_number, current_lang=None):
     """
     Send language selection menu with interactive buttons.
+    For first-time users (current_lang=None): Shows Hausa, Igbo, Yoruba (English is default if no selection)
+    For language switching: Excludes current language to fit WhatsApp's 3-button limit.
+    
+    Args:
+        recipient_phone_number: The recipient's phone number
+        current_lang: Current language code to exclude from options (None for first-time users)
+        
+    Returns:
+        Response from WhatsApp API
+    """
+    # All available languages
+    all_languages = [
+        {"id": "lang_en", "title": "English", "code": "en"},
+        {"id": "lang_ha", "title": "Hausa", "code": "ha"},
+        {"id": "lang_ig", "title": "Igbo", "code": "ig"},
+        {"id": "lang_yo", "title": "Yoruba", "code": "yo"},
+    ]
+    
+    # For first-time users, show only Nigerian languages (Hausa, Igbo, Yoruba)
+    if current_lang is None:
+        available_languages = [lang for lang in all_languages if lang["code"] in ["ha", "ig", "yo"]]
+        body_text = (
+            "Hey! 👋 I'm *WellBridge TB Health Bot* 🏥\n\n"
+            "I'm here to help answer your questions about Tuberculosis (TB) - "
+            "symptoms, prevention, treatment, and more!\n\n"
+            "🌍 I'm set to *English* by default.\n\n"
+            "💬 You can start asking questions right away, or select a different language:\n\n"
+        )
+    else:
+        # For language switching, exclude current language
+        available_languages = [lang for lang in all_languages if lang["code"] != current_lang]
+        available_languages = available_languages[:3]  # Take only first 3 for WhatsApp limit
+        body_text = (
+            "Hey! 👋 I'm *WellBridge TB Health Bot* 🏥\n\n"
+            "I'm here to help answer your questions about Tuberculosis (TB) - "
+            "symptoms, prevention, treatment, and more!\n\n"
+            "🌍 Select your preferred language:\n\n"
+        )
+    
+    # Add language options to text
+    for lang in available_languages:
+        body_text += f"🔹 {lang['title']}\n"
+    
+    # Add instruction for changing language later (only for first-time users)
+    if current_lang is None:
+        body_text += "\n💡 *To change language later:* Send \"change language\""
+    
+    buttons = [{"id": lang["id"], "title": lang["title"]} for lang in available_languages]
+    
+    return send_interactive_buttons(recipient_phone_number, body_text, buttons)
+
+
+
+def send_language_options_after_answer(recipient_phone_number):
+    """
+    Send a brief language options menu after answering a first-time user's question.
+    This is less verbose than the full welcome menu.
     
     Args:
         recipient_phone_number: The recipient's phone number
@@ -363,11 +538,11 @@ def send_language_selection_menu(recipient_phone_number):
         Response from WhatsApp API
     """
     body_text = (
-        "Welcome to WellBridge TB Health Bot! 🏥\n\n"
-        "Please select your preferred language:\n"
-        "🔹 Hausa - Hausa\n"
-        "🔹 Igbo - Ìgbò\n"
-        "🔹 Yoruba - Yorùbá\n"
+        "🌍 *Language Options*\n\n"
+        "I'm currently set to *English*. You can continue in English or switch to:\n\n"
+        "🔹 Hausa\n"
+        "🔹 Igbo\n"
+        "🔹 Yoruba"
     )
     
     buttons = [
@@ -392,36 +567,48 @@ def send_language_switch_confirmation(recipient_phone_number, language_name):
     """
     confirmations = {
         "ha": (
-            "✅ *An saita Hausa a matsayin yarenku!*\n\n"
-            "Yanzu zaku iya yin tambayoyi game da cutar TB a Hausa.\n\n"
-            "💡 *Don canza yare a lokacin zance:*\n"
-            "• Aika: \"canza yare\"\n"
-            "• Ko: \"sauyar da yare\"\n"
-            "• Ko kawai: \"yare\""
+            "✅ *Madalla! An saita Hausa a matsayin yarenku!*\n\n"
+            "Ina shirye in taimaka! Ku tambaye ni komai game da cutar TB kamar:\n"
+            "• Menene cutar tarin fuka (TB)?\n"
+            "• Ta yaya ake yaduwar cutar TB?\n"
+            "• Menene alamomin cutar TB?\n"
+            "• Ta yaya zan kare kaina daga cutar TB?\n"
+            "• Wane irin magani ake bayarwa?\n\n"
+            "💬 Rubuta tambayanku zan bayar da amsa mai amfani!\n\n"
+            "💡 *Don canza yare:* Aika \"canza yare\""
         ),
         "yo": (
-            "✅ *Yorùbá ti wà gẹ́gẹ́ bíi èdè rẹ!*\n\n"
-            "Ní báyìí o lè béèrè nípa TB ní Yorùbá.\n\n"
-            "💡 *Láti yí èdè padà láàrin ìbánisọ̀rọ̀:*\n"
-            "• Fi ránṣẹ́: \"yi ipada ede\"\n"
-            "• Tàbí: \"paarọ ede\"\n"
-            "• Tàbí nìkan: \"ede\""
+            "✅ *Ó dára! Yorùbá ti wà gẹ́gẹ́ bíi èdè rẹ!*\n\n"
+            "Mo ti ṣetan láti ràn ọ́ lọ́wọ́! O lè béèrè lọ́wọ́ mi nípa TB bíi:\n"
+            "• Kí ni TB (àrùn ẹ̀dọ̀fóró)?\n"
+            "• Báwo ni TB ṣe ń ràn kálẹ̀?\n"
+            "• Kí ni àwọn àmì àrùn TB?\n"
+            "• Báwo ni èmi ṣe lè ṣe ìdáàbòbò ara mi lọ́wọ́ TB?\n"
+            "• Irú ìtọ́jú wo ni ó wà?\n\n"
+            "💬 Kọ ìbéèrè rẹ, èmi yóò sì dáhùn pẹ̀lú àlàyé!\n\n"
+            "💡 *Láti yí èdè padà:* Fi ránṣẹ́ \"yi ipada ede\""
         ),
         "ig": (
-            "✅ *A tọrọ Ìgbò dịka asụsụ gị!*\n\n"
-            "Ugbu a ị nwere ike ịjụ ajụjụ gbasara TB n'Ìgbò.\n\n"
-            "💡 *Iji gbanwee asụsụ n'etiti mkparịta ụka:*\n"
-            "• Zipu: \"gbanwee asụsụ\"\n"
-            "• Ma ọ bụ: \"họrọ asụsụ\"\n"
-            "• Ma ọ bụ naanị: \"asụsụ\""
+            "✅ *Ọ dị mma! A tọrọ Ìgbò dịka asụsụ gị!*\n\n"
+            "Adị m njikere inyere gị aka! Ị nwere ike ịjụ m ihe ọ bụla gbasara TB dị ka:\n"
+            "• Kedu ihe bụ TB (ọrịa nku)?\n"
+            "• Kedu ka TB si agbasa?\n"
+            "• Kedu ihe bụ ihe ngosi nke TB?\n"
+            "• Kedu ka m ga-esi gbochie TB?\n"
+            "• Kedu ụdị ọgwụgwọ dị?\n\n"
+            "💬 Dee ajụjụ gị, m ga-aza ya na nkọwa!\n\n"
+            "💡 *Iji gbanwee asụsụ:* Zipu \"gbanwee asụsụ\""
         ),
         "en": (
-            "✅ *English has been set as your language!*\n\n"
-            "You can now ask questions about TB in English.\n\n"
-            "💡 *To change language mid-conversation:*\n"
-            "• Send: \"change language\"\n"
-            "• Or: \"switch language\"\n"
-            "• Or simply: \"language\""
+            "✅ *Great! English has been set as your language!*\n\n"
+            "I'm ready to help! You can ask me anything about TB like:\n"
+            "• What is tuberculosis?\n"
+            "• How is TB transmitted?\n"
+            "• What are the symptoms of TB?\n"
+            "• How can I prevent TB?\n"
+            "• What treatments are available?\n\n"
+            "💬 Just type your question and I'll respond with helpful information!\n\n"
+            "💡 *To change language later:* Send \"change language\""
         )
     }
     
@@ -493,5 +680,62 @@ def is_language_switch_request(text: str) -> bool:
             return True
     
     return False
+
+
+def send_followup_questions(recipient_phone_number, lang="en"):
+    """
+    Send follow-up question buttons after answering a user query.
+    
+    Args:
+        recipient_phone_number: The recipient's phone number
+        lang: Language code (en, ha, yo, ig)
+        
+    Returns:
+        Response from WhatsApp API
+    """
+    followup_messages = {
+        "en": {
+            "text": "💡 *Want to learn more?* Here are some related questions:",
+            "buttons": [
+                {"id": "q_transmission", "title": "How TB spreads?"},
+                {"id": "q_symptoms", "title": "TB symptoms?"},
+                {"id": "q_prevention", "title": "Prevent TB?"},
+            ]
+        },
+        "ha": {
+            "text": "💡 *Kuna son ƙarin bayani?* Ga wasu tambayoyi masu alaƙa:",
+            "buttons": [
+                {"id": "q_transmission_ha", "title": "Yadda TB ke yaduwa?"},
+                {"id": "q_symptoms_ha", "title": "Alamomin TB?"},
+                {"id": "q_prevention_ha", "title": "Kare TB?"},
+            ]
+        },
+        "yo": {
+            "text": "💡 *Ṣe o fẹ́ kọ́ síi?* Èyí ni àwọn ìbéèrè tó jọmọ́:",
+            "buttons": [
+                {"id": "q_transmission_yo", "title": "Bí TB ṣe ń ràn?"},
+                {"id": "q_symptoms_yo", "title": "Àmì TB?"},
+                {"id": "q_prevention_yo", "title": "Dáàbò TB?"},
+            ]
+        },
+        "ig": {
+            "text": "💡 *Ị chọrọ ịmụta ọzọ?* Nke a bụ ajụjụ ndị metụtara ya:",
+            "buttons": [
+                {"id": "q_transmission_ig", "title": "Ka TB si agbasa?"},
+                {"id": "q_symptoms_ig", "title": "Ihe ngosi TB?"},
+                {"id": "q_prevention_ig", "title": "Gbochie TB?"},
+            ]
+        }
+    }
+    
+    # Get message for language, default to English
+    message_data = followup_messages.get(lang, followup_messages["en"])
+    
+    return send_interactive_buttons(
+        recipient_phone_number,
+        message_data["text"],
+        message_data["buttons"]
+    )
+
 
 

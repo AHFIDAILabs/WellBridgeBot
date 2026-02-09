@@ -250,7 +250,7 @@ prompt = None
 is_voice_input = False
 
 # 1. Process voice input if available
-if wav_audio_data is not None:
+if wav_audio_data is not None and len(wav_audio_data) > 100:  # Check minimum size
     # Create a hash of the audio data to check if it's new
     import hashlib
     audio_hash = hashlib.md5(wav_audio_data).hexdigest()
@@ -321,11 +321,19 @@ if prompt and vector_store:
                 lang = result.get("lang", "en")
                 detected_lang = result.get("detected_lang", "en")
                 
-                # Display the answer
+                # Display the text answer FIRST (instant feedback)
                 st.markdown(answer)
                 st.caption(f"📚 Source: {source} | Language: {detected_lang}")
+                
+                # Add assistant response to history immediately
+                st.session_state.messages.append({
+                    "role": "assistant", 
+                    "content": answer, 
+                    "source": source,
+                    "has_audio": False  # Will update if audio succeeds
+                })
 
-                # Generate voice response ONLY for voice input
+                # Generate voice response ONLY for voice input (after text is shown)
                 audio_file_path = None
                 if is_voice_input:
                     try:
@@ -336,22 +344,17 @@ if prompt and vector_store:
                                 st.audio(audio_file_path, format="audio/mp3")
                                 
                                 # Store audio file path for persistence
-                                audio_key = f"audio_{len(st.session_state.messages)}"
+                                audio_key = f"audio_{len(st.session_state.messages) - 1}"
                                 st.session_state.audio_responses[audio_key] = audio_file_path
+                                
+                                # Update the message to indicate audio is available
+                                st.session_state.messages[-1]["has_audio"] = True
                             else:
                                 st.warning("Audio generation completed but file not found")
                                 
                     except Exception as e:
                         st.warning(f"🔊 Audio playback not available: {str(e)}")
                         logger.error(f"TTS failed: {e}")
-
-                # Add assistant response to history
-                st.session_state.messages.append({
-                    "role": "assistant", 
-                    "content": answer, 
-                    "source": source,
-                    "has_audio": is_voice_input and audio_file_path is not None
-                })
                 
             except Exception as e:
                 error_msg = "I apologize, but I encountered an error while processing your question. Please try again."

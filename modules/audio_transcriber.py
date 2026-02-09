@@ -24,59 +24,70 @@ class NATLASTranscriber:
     def __init__(self):
         self.pipelines = {}
         self.enabled = False
-        self._load_models()
+        self.hf_token = None
+        self.supported_langs = []
+        self._initialize()
     
-    def _load_models(self):
-        """Lazy load N-ATLAS models"""
+    def _initialize(self):
+        """Initialize N-ATLAS with lazy loading support"""
         try:
+            # Just check dependencies and token availability
             from transformers import pipeline
             import librosa
             
             load_dotenv()
-            hf_token = os.getenv("HUGGINGFACE_API_TOKEN")
+            self.hf_token = os.getenv("HUGGINGFACE_API_TOKEN")
             
-            if not hf_token:
+            if not self.hf_token:
                 logger.warning("HuggingFace token not found, N-ATLAS unavailable")
                 return
             
-            os.environ["HF_TOKEN"] = hf_token
+            os.environ["HF_TOKEN"] = self.hf_token
             
             config = get_config()
-            natlas_langs = config.get_natlas_languages()
+            self.supported_langs = config.get_natlas_languages()
+            self.enabled = True
+            
+            logger.info(f"N-ATLAS initialized for lazy loading: {self.supported_langs}")
+            
+        except ImportError as e:
+            logger.warning(f"N-ATLAS dependencies not available: {e}")
+            self.enabled = False
+    
+    def _load_model(self, lang: str):
+        """Lazy load a specific N-ATLAS model on-demand"""
+        if lang in self.pipelines:
+            return  # Already loaded
+        
+        try:
+            from transformers import pipeline
             
             model_map = {
                 "ha": "Hausa-ASR",
                 "yo": "Yoruba-ASR",
                 "ig": "Igbo-ASR"
             }
-
-            for lang_code in natlas_langs:
-                if lang_code not in model_map:
-                    continue
-                
-                model_name = model_map[lang_code]
-                try:
-                    logger.info(f"Loading N-ATLAS {lang_code.upper()} model...")
-                    self.pipelines[lang_code] = pipeline(
-                        "automatic-speech-recognition",
-                        model=f'NCAIR1/{model_name}',
-                        token=hf_token
-                    )
-                    logger.info(f"✓ N-ATLAS {lang_code.upper()} loaded")
-                except Exception as e:
-                    logger.warning(f"✗ N-ATLAS {lang_code.upper()} failed: {e}")
             
-            self.enabled = len(self.pipelines) > 0
-            if self.enabled:
-                logger.info(f"N-ATLAS enabled for: {list(self.pipelines.keys())}")
+            if lang not in model_map:
+                raise NATLASError(f"No N-ATLAS model for language: {lang}")
             
-        except ImportError as e:
-            logger.warning(f"N-ATLAS dependencies not available: {e}")
-            self.enabled = False
+            model_name = model_map[lang]
+            logger.info(f"Loading N-ATLAS {lang.upper()} model on-demand...")
+            
+            self.pipelines[lang] = pipeline(
+                "automatic-speech-recognition",
+                model=f'NCAIR1/{model_name}',
+                token=self.hf_token
+            )
+            logger.info(f"✓ N-ATLAS {lang.upper()} loaded successfully")
+            
+        except Exception as e:
+            logger.error(f"✗ N-ATLAS {lang.upper()} failed to load: {e}")
+            raise NATLASError(f"Failed to load N-ATLAS model for {lang}: {e}")
     
     def can_transcribe(self, lang: str) -> bool:
         """Check if N-ATLAS can transcribe this language"""
-        return self.enabled and lang in self.pipelines
+        return self.enabled and lang in self.supported_langs
     
     def transcribe(self, audio_path: str, lang: str) -> str:
         """Transcribe using N-ATLAS"""
@@ -86,22 +97,46 @@ class NATLASTranscriber:
         try:
             import librosa
             
+            # Load model on-demand for this language
+            self._load_model(lang)
+            
             logger.info(f"N-ATLAS transcribing {lang}...")
             
             # Load audio at 16kHz
+            # assert os.path.exists(audio_path), f"Audio file does not exist: {audio_path}"
             audio_data, sample_rate = librosa.load(audio_path, sr=16000)
+            # Validate audio
+            if len(audio_data) == 0:
+                raise NATLASError("Audio file is empty or corrupted")
             
+            # Check minimum audio duration (at least 0.1 seconds)
+            min_duration = 0.1
+            if len(audio_data) / sample_rate < min_duration:
+                raise NATLASError(f"Audio too short (minimum {min_duration}s required)")
+            
+            # Format audio data properly for HuggingFace pipeline
+            audio_input = {
+                "raw": audio_data,
+                "sampling_rate": sample_rate
+            }
+
             # Transcribe
-            result = self.pipelines[lang](audio_data)
+
+            result = self.pipelines[lang](audio_input)
+
             text = result.get("text", "").strip()
-            
+
+
             if text and len(text) > 2:
                 logger.info(f"N-ATLAS success: '{text[:50]}...'")
                 return text
             else:
                 raise NATLASError("N-ATLAS returned empty transcription")
                 
+        except NATLASError:
+            raise
         except Exception as e:
+            print(f"N-ATLAS transcription exception: {e}")
             logger.error(f"N-ATLAS transcription failed: {e}")
             raise NATLASError(f"N-ATLAS error: {e}")
 
