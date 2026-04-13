@@ -276,19 +276,20 @@ def process_text_message(data: dict):
 def process_interactive_button(data: dict):
     """
     Process interactive button clicks in background thread.
-    Saves user's language preference and sends confirmation.
+    Handles both language selection and follow-up question buttons.
     """
     try:
         logger.info("🔘 Processing interactive button in background...")
         
-        # Get sender's WhatsApp ID (phone number)
+        # Get sender's WhatsApp ID (phone number) and message ID
         sender_phone = data.get('wa_id', 'unknown')
+        message_id = data.get('id')
         button_id = data.get('button_id')
         button_title = data.get('button_title')
         
         logger.info(f"Button click from {sender_phone}: {button_id} ({button_title})")
         
-        # Extract language code from button_id (format: "lang_xx")
+        # Handle language selection buttons (format: "lang_xx")
         if button_id and button_id.startswith("lang_"):
             lang_code = button_id.replace("lang_", "")
             
@@ -310,6 +311,56 @@ def process_interactive_button(data: dict):
             else:
                 logger.warning(f"⚠️  Invalid language code: {lang_code}")
                 send_text_message("Invalid language selection. Please try again.", sender_phone)
+        
+        # Handle follow-up question buttons (format: "q_*")
+        elif button_id and button_id.startswith("q_"):
+            logger.info(f"Follow-up question button clicked: {button_id}")
+            
+            # Map follow-up button IDs to actual questions
+            followup_questions = {
+                "q_transmission": "How does TB spread?",
+                "q_transmission_ha": "Yadda TB ke yaduwa?",
+                "q_transmission_yo": "Bí TB ṣe ń ràn?",
+                "q_transmission_ig": "Ka TB si agbasa?",
+                "q_symptoms": "What are the symptoms of TB?",
+                "q_symptoms_ha": "Alamomin TB?",
+                "q_symptoms_yo": "Àmì TB?",
+                "q_symptoms_ig": "Ihe ngosi TB?",
+                "q_prevention": "How can I prevent TB?",
+                "q_prevention_ha": "Kare TB?",
+                "q_prevention_yo": "Dáàbò TB?",
+                "q_prevention_ig": "Gbochie TB?",
+            }
+            
+            # Get the actual question text
+            question = followup_questions.get(button_id, button_title)
+            
+            # Get user's language preference
+            user_lang = preference_manager.get_user_preference(sender_phone) or "en"
+            
+            # Process the question like a regular message
+            logger.info(f"Processing follow-up question: {question}")
+            
+            # Show typing indicator while processing
+            if message_id:
+                send_typing_indicator(sender_phone, message_id)
+            
+            try:
+                # Get response from LLM handler
+                result = get_response(question, vector_store, user_lang)
+                response_text = result.get("answer", "Sorry, I couldn't process that question.")
+                
+                # Send response
+                send_text_message(response_text, sender_phone)
+                logger.info(f"✓ Follow-up answer sent for: {button_id}")
+                
+                # Send follow-up questions for this answer too
+                send_followup_questions(sender_phone, user_lang)
+                
+            except Exception as query_error:
+                logger.error(f"Error processing follow-up question: {query_error}")
+                send_text_message("Sorry, I couldn't process that. Please try asking again.", sender_phone)
+        
         else:
             logger.warning(f"⚠️  Invalid button_id format: {button_id}")
             send_text_message("Invalid button response. Please try again.", sender_phone)

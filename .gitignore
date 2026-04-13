@@ -208,3 +208,16 @@ __marimo__/
 
 # hash files
 last_kb_hash.txt
+
+# Refactored code cache directory
+.cache/
+*.cache
+
+# Temporary audio files (TTS/STT)
+audio.wav
+audio/
+sr/
+
+# Test files
+test_*.py
+!tests/

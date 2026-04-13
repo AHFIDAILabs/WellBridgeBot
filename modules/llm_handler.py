@@ -12,8 +12,14 @@ from langchain_community.tools import DuckDuckGoSearchResults
 from modules.language_utils import (
     detect_language, is_pidgin, get_language_name
 )
+from modules.intent_classifier import (
+    classify_intent, INTENT_CASUAL, INTENT_HEALTH, INTENT_OFF_TOPIC
+)
 
-from config import OPENROUTER_API_KEY, LLM_MODEL, MIN_SCORE
+from config import (
+    GOOGLE_API_KEY, OPENROUTER_API_KEY,
+    LLM_MODEL, LLM_PROVIDER, MIN_SCORE
+)
 
 logger = logging.getLogger(__name__)
 
@@ -21,19 +27,26 @@ logger = logging.getLogger(__name__)
 # ------------------- LLM Initialization -------------------
 
 def get_llm():
-    """Initialize the LLM with optimized settings for multilingual use."""
+    """Initialize the LLM using OpenRouter."""
     if not OPENROUTER_API_KEY:
-        logger.error("OPENROUTER_API_KEY is not set")
-        raise ValueError("OPENROUTER_API_KEY environment variable is missing")
+        raise ValueError("OPENROUTER_API_KEY is not set in .env")
 
+    logger.info(f"Using OpenRouter: {LLM_MODEL}")
     return ChatOpenAI(
         model=LLM_MODEL,
         base_url="https://openrouter.ai/api/v1",
         api_key=OPENROUTER_API_KEY,
         temperature=0.2,
-        max_tokens=600,
+        max_tokens=500,
         timeout=35,
     )
+
+
+def invoke_llm_with_fallback(prompt: str):
+    """Invoke LLM and return response content."""
+    llm = get_llm()
+    response = llm.invoke([HumanMessage(content=prompt)])
+    return response.content.strip()
 
 
 # ------------------- Translation -------------------
@@ -44,7 +57,6 @@ def translate_to_english(text: str, source_lang: str) -> str:
         return text
 
     try:
-        llm = get_llm()
         translation_prompts = {
             "yo": f"Translate this Yoruba health question to clear English. Preserve the meaning exactly.\n\nYoruba: {text}\n\nEnglish translation:",
             "ig": f"Translate this Igbo health question to clear English. Preserve the meaning exactly.\n\nIgbo: {text}\n\nEnglish translation:",
@@ -52,8 +64,7 @@ def translate_to_english(text: str, source_lang: str) -> str:
             "pidgin": f"Translate this Nigerian Pidgin health question to standard English. Preserve the meaning exactly.\n\nPidgin: {text}\n\nEnglish translation:"
         }
         prompt = translation_prompts.get(source_lang, f"Translate to English: {text}")
-        response = llm.invoke([HumanMessage(content=prompt)])
-        return response.content.strip()
+        return invoke_llm_with_fallback(prompt)
     except Exception as e:
         logger.error(f"Translation from {source_lang} failed: {e}")
         return text
@@ -65,8 +76,6 @@ def translate_from_english(text: str, target_lang: str) -> str:
         return text
 
     try:
-        llm = get_llm()
-        
         # Enhanced prompts for proper, standardized language output
         response_prompts = {
             "yo": f"""Translate this English health information to STANDARD Yoruba language.
@@ -107,8 +116,7 @@ Nigerian Pidgin translation:"""
         }
         
         prompt = response_prompts.get(target_lang, f"Translate to {get_language_name(target_lang)}: {text}")
-        response = llm.invoke([HumanMessage(content=prompt)])
-        translated = response.content.strip()
+        translated = invoke_llm_with_fallback(prompt)
         
         # Log the translation for debugging
         logger.info(f"Translation to {target_lang}: {translated[:100]}...")
@@ -348,15 +356,73 @@ Answer:"""
         return "Unable to fetch current information at this time. Please try again or consult a healthcare professional."
 
 
+# ------------------- Casual & Off-Topic Handlers -------------------
+
+CASUAL_RESPONSE_PROMPT = """You are WellBridge, a friendly multilingual Nigerian health assistant 
+specializing in tuberculosis (TB) and general wellness.
+
+The user sent a casual message (greeting, small talk, or question about you).
+Respond warmly, briefly introduce yourself if appropriate, and gently let them know 
+you're here to help with health questions — especially about TB.
+
+Keep it short (2-3 sentences max). Be warm and Nigerian-friendly.
+Respond in the SAME language the user wrote in.
+
+User message: "{query}"
+
+Your response:"""
+
+OFF_TOPIC_REDIRECTS = {
+    "en": "I appreciate your question! However, I'm WellBridge — a health assistant focused on tuberculosis and wellness. I'd love to help you with any health-related questions. Is there anything about your health I can assist with?",
+    "yo": "Mo dúpẹ́ fún ìbéèrè rẹ! Àmọ́, èmi ni WellBridge — olùrànlọ́wọ́ ìlera tí ó fọkàn sí àrùn ikọ́ ẹ̀dọ̀fóró àti ìlera. Ṣé ìbéèrè ìlera kan wà tí mo lè ràn ọ́ lọ́wọ́?",
+    "ig": "Daalụ maka ajụjụ gị! Ma, abụ m WellBridge — onye inyeaka ahụike lekwasịrị anya na TB na ahụike. Enwere ajụjụ ahụike ọ bụla m nwere ike inyere gị aka?",
+    "ha": "Na gode da tambayar ka! Amma, ni ne WellBridge — mai taimakon lafiya wanda ke mayar da hankali kan tarin fuka da lafiya. Shin kana da wata tambayar lafiya da zan iya taimaka maka?",
+    "pidgin": "I appreciate your question o! But na WellBridge I be — health assistant wey dey focus on TB and wellness. I go like help you with any health question. Anything about your health wey you wan ask?",
+}
+
+
+def _handle_casual(query: str, detected_lang: str) -> Dict[str, Any]:
+    """Generate a warm casual response using LLM."""
+    try:
+        prompt = CASUAL_RESPONSE_PROMPT.format(query=query)
+        answer = invoke_llm_with_fallback(prompt)
+        return {
+            "source": "casual_chat",
+            "answer": answer,
+            "lang": detected_lang,
+            "detected_lang": detected_lang,
+        }
+    except Exception as e:
+        logger.error(f"Casual response failed: {e}")
+        return {
+            "source": "casual_chat",
+            "answer": "Hello! I'm WellBridge, your health assistant. How can I help you today?",
+            "lang": "en",
+            "detected_lang": detected_lang,
+        }
+
+
+def _handle_off_topic(detected_lang: str) -> Dict[str, Any]:
+    """Return a polite redirect to health topics."""
+    answer = OFF_TOPIC_REDIRECTS.get(detected_lang, OFF_TOPIC_REDIRECTS["en"])
+    return {
+        "source": "off_topic_redirect",
+        "answer": answer,
+        "lang": detected_lang,
+        "detected_lang": detected_lang,
+    }
+
+
 # ------------------- Main Response -------------------
 
 def get_response(query: str, vector_store, lang) -> Dict[str, Any]:
     """Main function to get multilingual responses.
     
-    STRICT CONTROL FLOW:
-    1. ALWAYS try vector store FIRST
-    2. ONLY use web search if vector store score < MIN_SCORE
-    3. NEVER skip vector store
+    AGENTIC CONTROL FLOW:
+    0. Classify intent (casual / health / off-topic)
+    1. CASUAL  → warm reply, no KB needed
+    2. HEALTH  → KB search → web fallback
+    3. OFF_TOPIC → polite redirect
     """
     try:
         # Auto-detect language if lang="auto"
@@ -385,7 +451,20 @@ def get_response(query: str, vector_store, lang) -> Dict[str, Any]:
         logger.info(f"Target response language: {target_lang}")
         logger.info(f"=" * 70)
 
-        # STEP 1: ALWAYS search knowledge base FIRST
+        # STEP 0: Intent classification (keyword filter + LLM fallback)
+        logger.info("STEP 0: Classifying user intent...")
+        intent = classify_intent(query, invoke_fn=invoke_llm_with_fallback)
+        logger.info(f"Intent classified as: {intent}")
+
+        if intent == INTENT_CASUAL:
+            logger.info("→ Routing to casual chat handler")
+            return _handle_casual(query, target_lang)
+
+        if intent == INTENT_OFF_TOPIC:
+            logger.info("→ Routing to off-topic redirect")
+            return _handle_off_topic(target_lang)
+
+        # STEP 1: HEALTH intent — search knowledge base
         logger.info("STEP 1: Searching vector store (knowledge base)...")
         search_variations = create_multilingual_search_variations(query, lang)
         logger.info(f"Search variations: {search_variations}")
@@ -432,7 +511,7 @@ def get_response(query: str, vector_store, lang) -> Dict[str, Any]:
         
         # USE WEB SEARCH FALLBACK
         logger.info(f"✗ DECISION: KB insufficient (score {kb_score:.2f} < threshold {MIN_SCORE:.2f})")
-        logger.info("STEP 3: Activating web search fallback...")
+        logger.info("STEP 4: Activating web search fallback...")
         
         fallback_answer = web_search_fallback(query, target_lang)
         

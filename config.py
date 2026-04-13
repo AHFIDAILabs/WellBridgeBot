@@ -5,7 +5,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # API Keys
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")  # Legacy - kept for fallback
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")  # Gemini API key
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 PINECONE_REGION = os.getenv("PINECONE_REGION", "us-east-1")
 PINECONE_CLOUD = os.getenv("PINECONE_CLOUD", "aws")
@@ -19,7 +20,8 @@ TEXT_KEY = "text"
 EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
 # LLM Configuration
-LLM_MODEL = "openai/gpt-4o-mini"  # Better for multilingual tasks than free models
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openrouter")
+LLM_MODEL = "openai/gpt-4o-mini"  # OpenRouter model
 
 # Language Configuration
 SUPPORTED_LANGUAGES = {
@@ -72,7 +74,7 @@ CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 200
 
 # Response Configuration
-MAX_RESPONSE_LENGTH = 600  # tokens
+MAX_RESPONSE_LENGTH = 500  # tokens
 TEMPERATURE = 0.2
 RESPONSE_TIMEOUT = 35  # seconds
 
@@ -131,13 +133,13 @@ def get_tts_config(lang_code):
         "has_native": config["has_tts"]
     }
 
-# Environment-specific overrides
-if os.getenv("ENVIRONMENT") == "development":
-    LLM_MODEL = "openai/gpt-oss-20b:free"  # Use free model for development
-    RETRIEVAL_K = 3  # Fewer retrievals for faster testing
-    MAX_RESPONSE_LENGTH = 400
+# # Environment-specific overrides
+# if os.getenv("ENVIRONMENT") == "development":
+#     LLM_MODEL = "openai/gpt-oss-20b:free"  # Use free model for development
+#     RETRIEVAL_K = 3  # Fewer retrievals for faster testing
+#     MAX_RESPONSE_LENGTH = 500
     
-elif os.getenv("ENVIRONMENT") == "production":
-    LLM_MODEL = "openai/gpt-4o-mini"  # Better model for production
-    RETRIEVAL_K = 5
-    MAX_RESPONSE_LENGTH = 600
+# elif os.getenv("ENVIRONMENT") == "production":
+#     LLM_MODEL = "openai/gpt-4o-mini"  # Better model for production
+#     RETRIEVAL_K = 5
+#     MAX_RESPONSE_LENGTH = 500
